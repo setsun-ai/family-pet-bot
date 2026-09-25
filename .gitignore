@@ -1,0 +1,26 @@
+# --- secrets and private data: NEVER commit ---
+.env
+.env.*
+!.env.example
+data/
+*.sqlite3
+*.sqlite3-*
+# your own persona with family details
+personas/*.local.md
+*.local.md
+
+# --- runtime ---
+logs/
+*.lock
+backups/
+
+# --- Python ---
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
