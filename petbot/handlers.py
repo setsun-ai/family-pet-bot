@@ -22,19 +22,22 @@ from aiogram.types import Message, User
 from .ai import AIService
 from .common import ChatLocks, RateLimiter, ServiceError, addressed, limit_text, names_pattern
 from .config import Settings
+from .core import check_text, help_text, preview_text, status_text  # noqa: F401
 from .db import Database
 from .delivery import DeliveryService
+from .family import FamilyService
 from .housekeeping import Housekeeping
 from .i18n import t
+from .menus import publish_menus
 from .news import NewsService
-from .persona import filter_emoji, valid_nickname
-from .scheduler import Scheduler, news_plan
+from .persona import filter_emoji, split_messages, valid_nickname
+from .scheduler import Scheduler
 from .security import AccessControl
 from .sports import SportsService
 
 log = logging.getLogger(__name__)
 
-OWNER_PRIVATE_COMMANDS = {"status", "check", "allow", "deny", "users", "deliveries", "retry_delivery"}
+OWNER_PRIVATE_COMMANDS = {"status", "check", "allow", "deny", "users", "deliveries", "retry_delivery", "preview"}
 NICKNAME_COMMANDS = {"who", "name", "names", "unname"}
 
 
@@ -55,6 +58,7 @@ class App:
     active_tasks: set[asyncio.Task] = field(default_factory=set)
     last_check_ok: bool = False
     housekeeping: Housekeeping | None = None
+    family: FamilyService | None = None
 
     def __post_init__(self):
         self.names = names_pattern(self.settings.bot_names)
@@ -83,88 +87,6 @@ def split_command(text: str, username: str) -> tuple[str, str]:
     if target and target.casefold() != username.casefold():
         return "__other_bot__", ""
     return cmd.lower(), args.strip()
-
-
-def help_text(app: App) -> str:
-    s = app.settings
-    lines = [t("help_intro", name=s.display_name)]
-    if s.news_enabled:
-        lines.append(t("help_news"))
-    if s.sports_enabled:
-        lines.append(t("help_sports", command=s.sports_command))
-    lines.append(t("help_common"))
-    lines.append(t("help_owner"))
-    return "\n".join(lines)
-
-
-async def status_text(app: App) -> str:
-    s = app.settings
-    now = datetime.now(s.tz)
-    today = now.date().isoformat()
-    slots = news_plan(now, s, await app.db.family() or 0)
-    none = t("status_none")
-    lines = [
-        t("status_title", name=s.display_name),
-        t("status_db", ok=t("ok") if await app.db.ping() else t("error_word")),
-        t("status_owner", owner=await app.db.owner()),
-        t("status_chat", chat=await app.db.family() or t("status_chat_unset")),
-        t("status_ai", provider=s.ai_provider, model=s.model),
-        t("status_ai_last", value=app.ai.last_success or t("status_not_yet")),
-        t("status_ai_error", value=app.ai.last_error or none),
-        t("status_ai_usage", used=await app.db.usage(today), limit=s.max_ai_calls_per_day),
-        t("status_timezone", tz=s.timezone),
-        t("status_quiet", start=s.quiet_start_hour, end=s.quiet_end_hour),
-    ]
-    if s.news_enabled:
-        times = ", ".join(f"{slot.start:%H:%M}–{slot.end:%H:%M}" for slot in slots)
-        lines += [t("status_news", mode=s.news_mode, times=times),
-                  t("status_news_ai", used=await app.db.category_usage(today, "news"), limit=s.max_news_ai_calls_per_day),
-                  t("status_rss", value=app.news.last_error or none)]
-    else:
-        lines.append(t("status_news_off"))
-    if s.sports_enabled:
-        lines += [t("status_sports", team=s.sports_team_id, hour=s.sports_hour),
-                  t("status_sports_last", value=app.sports.last_success or t("status_not_yet")),
-                  t("status_sports_error", value=app.sports.last_error or none)]
-    else:
-        lines.append(t("status_sports_off"))
-    lines += [
-        t("status_nicknames", n=len(await app.db.family_names())),
-        t("status_delivery", value=app.delivery.last_error or none),
-        t("status_uncertain", n=len(await app.db.uncertain_deliveries())),
-        t("status_scheduler", value="; ".join(f"{k}: {v}" for k, v in app.scheduler.last_errors.items()) or none),
-    ]
-    return "\n".join(lines)
-
-
-async def check_text(app: App) -> str:
-    """/check: real connectivity test (one small, possibly paid AI request)."""
-    lines = [t("check_title")]
-    app.last_check_ok = await app.db.ping()
-    lines.append("SQLite: " + (t("ok") if app.last_check_ok else t("error_word")))
-    try:
-        await app.ai.check()
-        lines.append(t("check_ai_ok"))
-    except ServiceError as error:
-        app.last_check_ok = False
-        lines.append(t("check_ai_failed", error=error))
-    if app.settings.news_enabled:
-        try:
-            items = await app.news.articles(datetime.now(UTC))
-            lines.append(t("check_rss_ok", n=len(items)))
-            if app.news.last_error:
-                lines.append("RSS: " + app.news.last_error)
-        except ServiceError as error:
-            app.last_check_ok = False
-            lines.append("RSS: " + str(error))
-    if app.settings.sports_enabled:
-        try:
-            upcoming, last = await app.sports.fetch()
-            lines.append(t("check_sports_ok", n=sum(1 for m in (upcoming, last) if m)))
-        except ServiceError as error:
-            app.last_check_ok = False
-            lines.append("TheSportsDB: " + str(error))
-    return "\n".join(lines)
 
 
 async def handle(message: Message, app: App) -> None:
@@ -204,6 +126,7 @@ async def handle(message: Message, app: App) -> None:
             return
         if await app.access.claim(user.id, args, message.chat.type):
             await reply(message, t("claim_ok"), app)
+            await publish_menus(app.bot, app.db, s, app.sports.teams)  # the owner's menu appears right away
         elif is_private:
             await reply(message, t("claim_failed"), app)
         return
@@ -223,6 +146,7 @@ async def handle(message: Message, app: App) -> None:
         await reply(message, t("setup_probe"), app)
         await app.db.set("family_chat_id", str(message.chat.id))
         await reply(message, t("setup_done", chat=message.chat.id, tz=s.timezone), app)
+        await publish_menus(app.bot, app.db, s, app.sports.teams)
         return
     if not allowed:
         if is_private and command in {"start", "help", "privacy"} and app.limiter.allow("public:global", 60):
@@ -240,7 +164,7 @@ async def handle(message: Message, app: App) -> None:
         await reply(message, help_text(app), app, transient=False)
         return
     if command == "privacy":
-        await reply(message, t("privacy", days=s.history_days), app, transient=False)
+        await reply(message, t("privacy", days=s.history_days, platform="Telegram"), app, transient=False)
         return
     if command in OWNER_PRIVATE_COMMANDS:
         await owner_command(message, app, command, args, owner, is_private)
@@ -251,14 +175,15 @@ async def handle(message: Message, app: App) -> None:
             return
         async with app.locks.hold(message.chat.id):
             await app.db.forget(message.chat.id)
-        await reply(message, t("forget_done"), app)
+        await reply(message, t("forget_done", platform="Telegram"), app)
         return
-    if command == s.sports_command and s.sports_enabled:
-        if not app.limiter.allow(f"sports:{message.chat.id}", 2, 60):
+    team = app.sports.team(command)
+    if team is not None:
+        if not app.limiter.allow(f"sports:{message.chat.id}", 4, 60):
             await reply(message, t("sports_rate_limited"), app)
             return
         await typing(message)
-        await reply(message, await app.sports.summary(), app, transient=False)
+        await reply(message, await app.sports.summary(team), app, transient=False)
         return
     if command == "news" and s.news_enabled:
         if not app.limiter.allow(f"news:{message.chat.id}", 1, 60):
@@ -381,6 +306,8 @@ async def owner_command(message: Message, app: App, command: str, args: str, own
         rows = await app.db.uncertain_deliveries()
         body = "\n".join(f"ID {r['id']} | {r['kind']} | {r['chat_id']} | {r['created_at']}" for r in rows)
         await reply(message, t("deliveries_list", rows=body or t("status_none")), app)
+    elif command == "preview":
+        await preview_command(message, app, args)
     else:
         parts = args.split()
         if len(parts) != 2 or not parts[0].isdigit() or parts[1] != "confirm":
@@ -388,6 +315,21 @@ async def owner_command(message: Message, app: App, command: str, args: str, own
             return
         ok = await app.delivery.retry(int(parts[0]))
         await reply(message, t("retry_done") if ok else t("retry_missing"), app)
+
+
+async def preview_command(message: Message, app: App, args: str) -> None:
+    """/preview: see a post before the family does (details: core.preview_text)."""
+    await typing(message)
+    text = await preview_text(app, args)
+    if text is None:
+        await reply(message, t("preview_usage"), app)
+        return
+    if not text:
+        await reply(message, t("preview_nothing"), app)
+        return
+    await reply(message, t("preview_header"), app)
+    for part in split_messages(text):
+        await reply(message, part, app, transient=False)
 
 
 def make_router(app: App) -> Router:

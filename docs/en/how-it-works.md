@@ -7,14 +7,18 @@ A small bot (~1500 lines) built with the care of a production service, because i
 ## Map
 
 ```
-Telegram ──long polling──► handlers.py ──► ai.py ──► Anthropic / OpenAI REST
-                              │   │            ▲
-            access control ◄──┘   │            │ persona file + i18n prompts
-            (security.py)         ▼            │
-                          delivery.py ─────► Telegram sendMessage
+Telegram ──long polling──► handlers.py ─┐
+Discord ───gateway───────► discord_bot.py ┴► core.py, ai.py ──► Anthropic / OpenAI REST
+                              │                  ▲
+            access control ◄──┘                  │ persona file + i18n prompts
+            (security.py)                        │
+                          delivery.py (Delivery: bursts, at-most-once)
+                             ├─ DeliveryService ─► Telegram sendMessage
+                             └─ DiscordDelivery ─► Discord channel.send
                               ▲
-scheduler.py ─► news.py (RSS) │
-             └► sports.py (TheSportsDB)
+scheduler.py ─► news.py (RSS)
+             ├► sports.py (TheSportsDB, ESPN, upl.ua)
+             └► family.py (weekly praise, birthdays)
 all state ──► db.py (SQLite: owner, chat, memory, limits, deliveries)
 ```
 
@@ -22,10 +26,12 @@ all state ──► db.py (SQLite: owner, chat, memory, limits, deliveries)
 |---|---|
 | `config.py` | Typed, validated settings. Loaded explicitly, never as an import side effect. |
 | `i18n.py` | Every user-facing text and AI instruction in EN and RU. |
-| `handlers.py` | Commands, access control, conversation. |
+| `handlers.py`, `menus.py` | Telegram: commands, access control, conversation, "/" menus per audience. |
+| `discord_bot.py` | Discord: the same with slash commands, private answers, no pings. |
+| `core.py` | What the pet says regardless of the app: help, /status, /check, /preview. |
 | `ai.py` | Direct async REST clients, the spending limit, error mapping. |
 | `persona.py` | The persona file, emoji policy, answer tidying. |
-| `news.py`, `sports.py`, `scheduler.py` | Automatic posts. |
+| `news.py`, `sports.py`, `family.py`, `scheduler.py` | Automatic posts: news, matches, praise, birthdays. |
 | `delivery.py`, `housekeeping.py` | Sending (at most once) and tidying the group. |
 | `db.py`, `backup.py` | SQLite with serialized transactions, online backups. |
 

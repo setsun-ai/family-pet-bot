@@ -4,6 +4,8 @@
 
 About **15 minutes**. You need: a computer (Windows, macOS or Linux), a Telegram account and an AI API key.
 
+> Using **Discord** instead? Do steps 2–3 here, then follow [Discord](discord.md).
+
 ## 1. Create the Telegram bot (2 min)
 
 1. In Telegram open **@BotFather** (blue check mark) and send `/newbot`.
@@ -80,5 +82,6 @@ Now try it in the group: *"Whiskers, what are you doing?"*
 ## Next
 
 - [Your pet's character](persona.md): make it *your* pet.
+- [Your family's data](your-data.md): hobbies and birthdays for weekly praise, your teams, nicknames.
 - [Running it 24/7](running.md): the bot only works while the program runs.
 - [Configuration](configuration.md) · [Privacy](../../PRIVACY.md) · [Troubleshooting](troubleshooting.md)

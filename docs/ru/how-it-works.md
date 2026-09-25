@@ -7,14 +7,18 @@
 ## Карта
 
 ```
-Telegram ──long polling──► handlers.py ──► ai.py ──► Anthropic / OpenAI REST
-                              │   │            ▲
-            контроль доступа ◄┘   │            │ файл персонажа + промпты i18n
-            (security.py)         ▼            │
-                          delivery.py ─────► Telegram sendMessage
+Telegram ──long polling──► handlers.py ─┐
+Discord ───gateway───────► discord_bot.py ┴► core.py, ai.py ──► Anthropic / OpenAI REST
+                              │                  ▲
+            контроль доступа ◄┘                  │ файл персонажа + промпты i18n
+            (security.py)                        │
+                          delivery.py (Delivery: серии сообщений, не больше одного раза)
+                             ├─ DeliveryService ─► Telegram sendMessage
+                             └─ DiscordDelivery ─► Discord channel.send
                               ▲
-scheduler.py ─► news.py (RSS) │
-             └► sports.py (TheSportsDB)
+scheduler.py ─► news.py (RSS)
+             ├► sports.py (TheSportsDB, ESPN, upl.ua)
+             └► family.py (похвала недели, дни рождения)
 всё состояние ──► db.py (SQLite: владелец, чат, память, лимиты, отправки)
 ```
 
@@ -22,10 +26,12 @@ scheduler.py ─► news.py (RSS) │
 |---|---|
 | `config.py` | Типизированные проверенные настройки; загружаются явно, а не побочным эффектом импорта. |
 | `i18n.py` | Все тексты для людей и инструкции ИИ на EN и RU. |
-| `handlers.py` | Команды, контроль доступа, разговор. |
+| `handlers.py`, `menus.py` | Telegram: команды, контроль доступа, разговор, меню «/» для разных людей. |
+| `discord_bot.py` | Discord: то же со слэш-командами, скрытыми ответами и без пингов. |
+| `core.py` | Что говорит питомец независимо от мессенджера: памятка, /status, /check, /preview. |
 | `ai.py` | Прямые асинхронные REST-клиенты, лимит расходов, понятные ошибки. |
 | `persona.py` | Файл персонажа, правила эмодзи, чистка ответов. |
-| `news.py`, `sports.py`, `scheduler.py` | Автоматические публикации. |
+| `news.py`, `sports.py`, `family.py`, `scheduler.py` | Автоматические публикации: новости, матчи, похвала, дни рождения. |
 | `delivery.py`, `housekeeping.py` | Отправка (не больше одного раза) и порядок в группе. |
 | `db.py`, `backup.py` | SQLite с последовательными транзакциями, онлайн-копии. |
 

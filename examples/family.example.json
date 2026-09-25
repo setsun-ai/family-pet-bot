@@ -1,0 +1,14 @@
+{"members": [
+  {"name": "Anna",
+   "about": "14, the pet's favourite human. Plays the violin and chess, reads fantasy, collects stickers",
+   "birthday": "03-14"},
+  {"name": "Mom",
+   "about": "a maths teacher; keeps the garden, bakes on Sundays, loves detective series",
+   "birthday": "07-22"},
+  {"name": "Dad",
+   "about": "fixes everything in the house, cycles to work, cheers for the local football club",
+   "birthday": "12-05"},
+  {"name": "Grandpa",
+   "about": "lives in the countryside, fishes and solves crosswords. The pet knows him only from video calls",
+   "birthday": ""}
+]}

@@ -19,8 +19,8 @@ import httpx
 from .common import ServiceError, limit_text
 from .config import Settings
 from .db import Database
-from .i18n import prompt
-from .persona import load_persona, tidy, wants_detail
+from .i18n import prompt, weekday_name
+from .persona import load_persona, tidy_messages, wants_detail
 
 log = logging.getLogger(__name__)
 
@@ -51,13 +51,19 @@ class AIService:
         self.last_success: str | None = None
         self.cooldown_until = 0.0
 
+    def _now(self) -> str:
+        """Local date and time, so the pet knows it's Sunday morning or 2 a.m."""
+        now = datetime.now(self.settings.tz)
+        return prompt("now_info", weekday=weekday_name(now.weekday()), date=f"{now:%d.%m.%Y}", time=f"{now:%H:%M}")
+
     def _emoji_rule(self) -> str:
         allowed = self.settings.persona_emoji
         return prompt("emoji_rule", emoji=" ".join(allowed)) if allowed else ""
 
     async def complete(self, system: str, messages: list[dict], *, json_output: bool = False, max_tokens: int = 700,
-                       purpose: str = "chat", allow_partial: bool = False) -> str:
+                       purpose: str = "chat", allow_partial: bool = False, model: str | None = None) -> str:
         s = self.settings
+        model = model or s.model
         async with self.semaphore:
             if time.monotonic() < self.cooldown_until:
                 raise AIError(self.last_error or "ai_unavailable")
@@ -73,14 +79,14 @@ class AIService:
                 if s.ai_provider == "claude":
                     url = "https://api.anthropic.com/v1/messages"
                     headers = {"x-api-key": s.api_key, "anthropic-version": "2023-06-01"}
-                    body = {"model": s.model, "max_tokens": max_tokens, "system": system, "messages": messages}
+                    body = {"model": model, "max_tokens": max_tokens, "system": system, "messages": messages}
                     if json_output:
                         # Structured outputs: valid JSON by construction, not by asking nicely.
                         body["output_config"] = {"format": {"type": "json_schema", "schema": NEWS_SCHEMA}}
                 else:
                     url = "https://api.openai.com/v1/chat/completions"
                     headers = {"Authorization": "Bearer " + s.api_key}
-                    body = {"model": s.model, "max_completion_tokens": max_tokens,
+                    body = {"model": model, "max_completion_tokens": max_tokens,
                             "messages": [{"role": "system", "content": system}, *messages], "store": False}
                     if json_output:
                         body["response_format"] = {"type": "json_schema", "json_schema": {
@@ -162,12 +168,12 @@ class AIService:
             messages.append({"role": "user", "content": current})
         details = wants_detail(text)
         identity = json.dumps({"author_name": name[:100], "nickname_set_by_owner": verified_name}, ensure_ascii=False)
-        system = "\n\n".join(part for part in (self.persona, self._emoji_rule(), prompt("chat_rules"),
+        system = "\n\n".join(part for part in (self.persona, self._emoji_rule(), prompt("chat_rules"), self._now(),
                                                 prompt("author_info") + " " + identity) if part)
         if reply_context:
             system += "\n" + prompt("reply_context") + " " + json.dumps(reply_context[:1800], ensure_ascii=False)
         content = await self.complete(system, messages, max_tokens=1200 if details else 450, allow_partial=True)
-        return limit_text(tidy(content, self.settings.persona_emoji, 2300 if details else 650, compact=not details))
+        return limit_text(tidy_messages(content, self.settings.persona_emoji, 2300 if details else 650))
 
     async def news(self, title: str, summary: str) -> NewsDecision:
         system = "\n\n".join(part for part in (self.persona, self._emoji_rule(), prompt("news_task")) if part)
@@ -183,7 +189,7 @@ class AIService:
             if decision not in {"accept", "reject"} or not isinstance(text, str):
                 raise ValueError
             if decision == "accept":
-                text = tidy(text, self.settings.persona_emoji, 550)
+                text = tidy_messages(text, self.settings.persona_emoji, 550, max_parts=2)
                 if not text:
                     raise ValueError
                 return NewsDecision(True, text)
@@ -191,12 +197,17 @@ class AIService:
         except (ValueError, TypeError, KeyError):
             raise AIError("ai_bad_json") from None
 
-    async def sports_comment(self, facts: dict) -> str:
-        """One short in-character line about a match. Facts come from the API, never from the model."""
-        system = "\n\n".join(part for part in (self.persona, self._emoji_rule(), prompt("sports_task")) if part)
+    async def post(self, task: str, facts: dict, *, max_parts: int = 4, maximum: int = 900) -> str:
+        """
+        A scheduled post (match preview/result, praise, birthday) in the pet's voice,
+        as a few short chat messages. `facts` are data from the app - the prompt
+        forbids changing or adding facts.
+        """
+        system = "\n\n".join(part for part in (self.persona, self._emoji_rule(), prompt("post_rules"), self._now(),
+                                                prompt(task)) if part)
         raw = await self.complete(system, [{"role": "user", "content": json.dumps(facts, ensure_ascii=False)}],
-                                  max_tokens=200, allow_partial=True)
-        return tidy(raw, self.settings.persona_emoji, 220)
+                                  max_tokens=600, allow_partial=True, purpose=task, model=self.settings.post_model or None)
+        return tidy_messages(raw, self.settings.persona_emoji, maximum, max_parts=max_parts)
 
     async def check(self) -> str:
         return await self.complete("Reply with exactly: OK", [{"role": "user", "content": "Connection check."}],

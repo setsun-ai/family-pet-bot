@@ -1,13 +1,15 @@
 """
-Background jobs: daily news slots, match-day announcements and results, cleanup.
+Background jobs: good news, match previews and results, weekly praise, birthdays, cleanup.
 
-Nothing is posted during quiet hours, nothing is posted twice (deliveries are
-de-duplicated in SQLite), and old events are never posted late as "new".
+Nothing is posted during quiet hours, nothing twice (deliveries are
+de-duplicated in SQLite), old events are never posted late as "new", and
+automatic posts keep a polite distance from each other.
 """
 from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -16,11 +18,13 @@ from .common import ServiceError
 from .config import Settings
 from .db import Database
 from .delivery import DeliveryService
+from .family import FamilyService, praise_due, week_key
 from .i18n import t
 from .news import NewsService
-from .sports import Match, SportsService
+from .sports import Match, SportsService, Team
 
 log = logging.getLogger(__name__)
+POST_KINDS = ("news", "sports-preview", "sports-result", "praise", "birthday")
 
 
 @dataclass(frozen=True)
@@ -39,19 +43,16 @@ def quiet_time(now: datetime, settings: Settings) -> bool:
 
 
 def news_count(day: date, settings: Settings) -> int:
-    if settings.news_mode == "once":
-        return 1
-    if settings.news_mode == "twice":
-        return 2
-    # A steady 2 / 1 / 2 / 1 rhythm - not "even day of month", which breaks at month ends.
-    return 2 if (day - date(2026, 1, 1)).days % 2 == 0 else 1
+    parity = (day - date(2026, 1, 1)).days % 2 == 0
+    return {"once": 1, "twice": 2, "every2days": 1 if parity else 0}.get(settings.news_mode, 2 if parity else 1)
 
 
 def news_plan(now: datetime, settings: Settings, chat_id: int = 0) -> list[NewsSlot]:
     local = now.astimezone(settings.tz)
     day = local.date().isoformat()
-    specs = [(day, settings.news_hour, settings.news_minute)]
-    if news_count(local.date(), settings) == 2:
+    count = news_count(local.date(), settings)
+    specs = [(day, settings.news_hour, settings.news_minute)][:count]
+    if count == 2:
         specs.append((day + ":evening", settings.news_evening_hour, settings.news_evening_minute))
     result = []
     for key, hour, minute in specs:
@@ -65,14 +66,14 @@ def news_plan(now: datetime, settings: Settings, chat_id: int = 0) -> list[NewsS
     return result
 
 
-def morning_due(match: Match | None, now: datetime, settings: Settings) -> bool:
-    """Announce between SPORTS_HOUR and +3 h on match day, and only before kick-off."""
+def morning_due(match: Match | None, now: datetime, settings: Settings, hour: int | None = None) -> bool:
+    """Preview between the team's hour and +3 h on match day, and only before kick-off."""
     if match is None or match.status != "upcoming" or match.kickoff is None:
         return False
     local = now.astimezone(settings.tz)
     if match.kickoff.astimezone(settings.tz).date() != local.date():
         return False
-    start = local.replace(hour=settings.sports_hour, minute=0, second=0, microsecond=0)
+    start = local.replace(hour=settings.sports_hour if hour is None else hour, minute=0, second=0, microsecond=0)
     return start <= local < start + timedelta(hours=3) and now < match.kickoff
 
 
@@ -85,12 +86,11 @@ def result_due(match: Match | None, now: datetime) -> bool:
 
 class Scheduler:
     def __init__(self, settings: Settings, db: Database, news: NewsService, sports: SportsService,
-                 delivery: DeliveryService):
+                 delivery: DeliveryService, family: FamilyService | None = None):
         self.settings, self.db, self.news, self.sports, self.delivery = settings, db, news, sports, delivery
+        self.family = family
         self.tasks: list[asyncio.Task] = []
         self.last_errors: dict[str, str] = {}
-        self._sports_fetched: datetime | None = None
-        self._sports_attempt: datetime | None = None
 
     def start(self) -> None:
         if self.tasks:
@@ -98,8 +98,10 @@ class Scheduler:
         jobs = [("cleanup", self.cleanup_tick, 3600)]
         if self.settings.news_enabled:
             jobs.append(("news", self.news_tick, 60))
-        if self.settings.sports_enabled:
+        if self.sports.teams:
             jobs.append(("sports", self.sports_tick, 60))  # local tick; HTTP polling is adaptive
+        if self.family and self.family.members:
+            jobs.append(("family", self.family_tick, 60))
         for name, function, interval in jobs:
             self.tasks.append(asyncio.create_task(self._loop(name, function, interval), name="scheduler-" + name))
 
@@ -122,6 +124,11 @@ class Scheduler:
                 log.error("Scheduled %s failed (%s)", name, type(error).__name__)
             await asyncio.sleep(interval)
 
+    async def _recent_post(self, chat: int, now: datetime, minutes: int, kinds: tuple[str, ...] = POST_KINDS) -> bool:
+        last = await self.db.last_delivery_at(chat, kinds)
+        return bool(last and now - last < timedelta(minutes=minutes))
+
+    # --- news ---
     async def news_tick(self, now: datetime | None = None) -> None:
         now = now or datetime.now(self.settings.tz)
         chat = await self.db.family()
@@ -130,23 +137,20 @@ class Scheduler:
         for slot in news_plan(now, self.settings, chat):
             if not slot.start <= now < slot.end or await self.db.has_delivery(chat, "daily", slot.key):
                 continue
-            # A manual /news and an automatic post don't arrive back to back.
-            last = await self.db.last_delivery_at(chat, ("news",))
-            if last and now - last < timedelta(hours=2):
-                continue
-            sports_last = await self.db.last_delivery_at(chat, ("sports-morning", "sports-result"))
-            if sports_last and now - sports_last < timedelta(minutes=30):
+            # A manual /news and an automatic post don't come back to back; other posts get 30 min of air.
+            if await self._recent_post(chat, now, 120, ("news",)) or await self._recent_post(chat, now, 30):
                 continue
             if not await self.db.claim_scheduled_attempt(chat, "news:" + slot.key, now):
                 continue
             await self.news.publish(chat, slot.key, now=now)
             return
 
-    def _poll_interval(self, now: datetime) -> timedelta:
-        upcoming, last = self.sports.cached
+    # --- sports ---
+    def _poll_interval(self, team: Team, now: datetime) -> timedelta:
+        state = self.sports.state[team.key]
         today = now.astimezone(self.settings.tz).date()
-        match_day = any(m and m.kickoff and m.kickoff.astimezone(self.settings.tz).date() == today
-                        for m in (upcoming, last))
+        match_day = any(m and m.kickoff and m.kickoff.astimezone(self.settings.tz).date() in (today, today - timedelta(days=1))
+                        for m in (state.upcoming, state.last))
         return timedelta(minutes=self.settings.sports_check_minutes if match_day else self.settings.sports_idle_hours * 60)
 
     async def sports_tick(self, now: datetime | None = None) -> None:
@@ -154,26 +158,66 @@ class Scheduler:
         chat = await self.db.family()
         if not chat:
             return
-        interval = self._poll_interval(now)
-        stale = self._sports_fetched is None or now - self._sports_fetched >= interval
-        morning = now.astimezone(self.settings.tz).replace(hour=self.settings.sports_hour, minute=0, second=0, microsecond=0)
-        if self._sports_fetched and self._sports_fetched < morning <= now:
-            stale = True  # always refresh once when the announcement window opens
+        for team in self.sports.teams:
+            try:
+                await self._team_tick(team, chat, now)
+            except ServiceError as error:
+                self.last_errors["sports:" + team.key] = str(error)
+
+    async def _team_tick(self, team: Team, chat: int, now: datetime) -> None:
+        state = self.sports.state[team.key]
+        stale = state.fetched is None or now - state.fetched >= self._poll_interval(team, now)
+        window = now.astimezone(self.settings.tz).replace(hour=team.hour, minute=0, second=0, microsecond=0)
+        if state.fetched and state.fetched < window <= now:
+            stale = True  # refresh once when the preview window opens
         if stale:
-            # During an outage, don't hit the API on every one-minute tick.
-            if self._sports_attempt and now - self._sports_attempt < timedelta(minutes=5):
-                return
-            self._sports_attempt = now
-            await self.sports.fetch()
-            self._sports_fetched = now
-        if quiet_time(now, self.settings):
+            if state.attempt and now - state.attempt < timedelta(minutes=5):
+                return  # during an outage, don't hit the source every minute
+            state.attempt = now
+            await self.sports.fetch(team, force=True)
+            state.fetched = now
+        if quiet_time(now, self.settings) or await self._recent_post(chat, now, 10):
             return
-        upcoming, last = self.sports.cached
-        if morning_due(upcoming, now, self.settings) and not await self.db.has_delivery(chat, "sports-morning", upcoming.id):
-            await self.delivery.send(chat, await self.sports.morning_message(upcoming), [("sports-morning", upcoming.id)])
-        if (self.settings.sports_results and result_due(last, now)
-                and not await self.db.has_delivery(chat, "sports-result", last.id)):
-            await self.delivery.send(chat, await self.sports.result_message(last), [("sports-result", last.id)])
+        upcoming, last = state.upcoming, state.last
+        if morning_due(upcoming, now, self.settings, team.hour):
+            key = f"{team.key}:{upcoming.id}"
+            if not await self.db.has_delivery(chat, "sports-preview", key):
+                await self.delivery.send(chat, await self.sports.preview_message(team, upcoming), [("sports-preview", key)],
+                                         sound="first")
+                return
+        if team.results and result_due(last, now):
+            key = f"{team.key}:{last.id}"
+            if not await self.db.has_delivery(chat, "sports-result", key):
+                await self.delivery.send(chat, await self.sports.result_message(team, last, upcoming), [("sports-result", key)],
+                                         sound="none")  # results arrive quietly
+
+    # --- family ---
+    async def family_tick(self, now: datetime | None = None) -> None:
+        now = now or datetime.now(self.settings.tz)
+        chat = await self.db.family()
+        if not chat or quiet_time(now, self.settings) or await self._recent_post(chat, now, 30):
+            return
+        local = now.astimezone(self.settings.tz)
+        if local.hour >= self.settings.birthday_hour:
+            for member in self.family.birthdays(local):
+                key = f"{local.year}:{member.name}"
+                if not await self.db.has_delivery(chat, "birthday", key) and \
+                        await self.db.claim_scheduled_attempt(chat, "birthday:" + key, now):
+                    await self.delivery.send(chat, await self.family.birthday_text(member, local), [("birthday", key)])
+                    return
+        s = self.settings
+        if s.praise_enabled and praise_due(local, s.praise_weekday, s.praise_hour):
+            week = week_key(local)
+            if await self.db.has_delivery(chat, "praise", week) or \
+                    not await self.db.claim_scheduled_attempt(chat, "praise:" + week, now):
+                return
+            member, rotation = await self.family.choose()
+            if member is None:
+                return
+            text = await self.family.praise_text(member, local)
+            if await self.delivery.send(chat, text, [("praise", week)]):
+                await self.db.set("praise_rotation", json.dumps(rotation, ensure_ascii=False))
+                await self.family.remember_praise(member, text)
 
     async def cleanup_tick(self) -> None:
         await self.db.cleanup(self.settings.history_days)

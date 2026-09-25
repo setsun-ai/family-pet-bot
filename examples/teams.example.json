@@ -1,0 +1,6 @@
+[
+  {"name": "Arsenal", "command": "arsenal", "source": "espn", "league": "eng.1", "team_id": "359", "hour": 10},
+  {"name": "Arsenal in the CL", "command": "arsenal_cl", "source": "espn", "league": "uefa.champions", "team_id": "359",
+   "hour": 12},
+  {"name": "Lakers", "command": "lakers", "source": "thesportsdb", "team_id": "134867", "hour": 9, "analysis": false}
+]

@@ -31,10 +31,12 @@ class ConfigError(ValueError):
 
 @dataclass(frozen=True)
 class Settings:
+    platform: str = "telegram"  # telegram | discord
     bot_token: str = field(repr=False, default="")
     ai_provider: str = "claude"
     api_key: str = field(repr=False, default="")
     model: str = DEFAULT_MODELS["claude"]
+    post_model: str = ""  # optional stronger model for automatic posts (empty = MODEL)
     owner_id: int | None = None
     language: str = "en"
     persona_file: Path = ROOT / "personas" / "cat.en.md"
@@ -65,6 +67,13 @@ class Settings:
     sports_results: bool = True
     sports_check_minutes: int = 15
     sports_idle_hours: int = 6
+    sports_teams_file: Path | None = None
+    # family: weekly praise and birthdays
+    family_file: Path | None = None
+    praise_enabled: bool = False
+    praise_weekday: int = 5
+    praise_hour: int = 12
+    birthday_hour: int = 9
     # quiet hours, limits, memory
     quiet_start_hour: int = 23
     quiet_end_hour: int = 8
@@ -123,10 +132,16 @@ class Settings:
         key_name = "ANTHROPIC_API_KEY" if provider == "claude" else "OPENAI_API_KEY"
         model_name = "ANTHROPIC_MODEL" if provider == "claude" else "OPENAI_MODEL"
         model = text(model_name, DEFAULT_MODELS[provider]) or DEFAULT_MODELS[provider]
-        token, key = text("BOT_TOKEN"), text(key_name)
+        platform = text("PLATFORM", "telegram").lower() or "telegram"
+        if platform not in {"telegram", "discord"}:
+            raise ConfigError("PLATFORM: use telegram or discord.")
+        token_name = "BOT_TOKEN" if platform == "telegram" else "DISCORD_TOKEN"
+        token, key = text(token_name), text(key_name)
         if validate_keys:
-            if not re.fullmatch(r"[1-9]\d{4,15}:[A-Za-z0-9_-]{30,}", token):
-                raise ConfigError("BOT_TOKEN is missing or malformed. Run the setup (python -m petbot setup) or edit .env.")
+            token_shape = (r"[1-9]\d{4,15}:[A-Za-z0-9_-]{30,}" if platform == "telegram"
+                           else r"[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{20,}")
+            if not re.fullmatch(token_shape, token):
+                raise ConfigError(f"{token_name} is missing or malformed. Run the setup (python -m petbot setup) or edit .env.")
             if len(key) < 15 or any(word in key.lower() for word in PLACEHOLDER_WORDS):
                 raise ConfigError(f"Fill in {key_name} in .env or run the setup (python -m petbot setup).")
 
@@ -147,11 +162,11 @@ class Settings:
             raise ConfigError(f"PERSONA_FILE: file not found: {persona}")
 
         news_mode = text("NEWS_MODE", "alternate").lower() or "alternate"
-        if news_mode not in {"alternate", "once", "twice"}:
-            raise ConfigError("NEWS_MODE: use alternate, once or twice.")
+        if news_mode not in {"alternate", "once", "twice", "every2days"}:
+            raise ConfigError("NEWS_MODE: use alternate, once, twice or every2days.")
         first = number("NEWS_HOUR", 11, 0, 23) * 60 + number("NEWS_MINUTE", 0, 0, 59)
         second = number("NEWS_EVENING_HOUR", 18, 0, 23) * 60 + number("NEWS_EVENING_MINUTE", 30, 0, 59)
-        if news_mode != "once" and second - first < 180:
+        if news_mode not in {"once", "every2days"} and second - first < 180:
             raise ConfigError("The evening news slot must be at least 3 hours after the first one (NEWS_EVENING_HOUR).")
         feeds = items("NEWS_FEEDS") or DEFAULT_FEEDS
         if any(not feed.startswith("https://") for feed in feeds):
@@ -159,15 +174,22 @@ class Settings:
 
         sports_enabled = flag("SPORTS_ENABLED", False)
         team = text("SPORTS_TEAM_ID")
-        if sports_enabled and not team.isdigit():
+        teams_file = path("SPORTS_TEAMS_FILE", "") if text("SPORTS_TEAMS_FILE") else None
+        if teams_file is not None and not teams_file.is_file():
+            raise ConfigError(f"SPORTS_TEAMS_FILE: file not found: {teams_file}")
+        family_file = path("FAMILY_FILE", "") if text("FAMILY_FILE") else None
+        if family_file is not None and not family_file.is_file():
+            raise ConfigError(f"FAMILY_FILE: file not found: {family_file}")
+        if sports_enabled and teams_file is None and not team.isdigit():
             raise ConfigError("SPORTS_TEAM_ID: set the numeric TheSportsDB team id (see docs: sports).")
 
         sports_command = (text("SPORTS_COMMAND", "match") or "match").lstrip("/").lower()
         if not re.fullmatch(r"[a-z0-9_]{1,32}", sports_command):
-            raise ConfigError("SPORTS_COMMAND: 1-32 latin letters, digits or _ (Telegram command rules).")
+            raise ConfigError("SPORTS_COMMAND: 1-32 latin letters, digits or _ (command rules of Telegram and Discord).")
 
         return cls(
-            bot_token=token, ai_provider=provider, api_key=key, model=model, owner_id=owner,
+            platform=platform, bot_token=token, ai_provider=provider, api_key=key, model=model, post_model=text("POST_MODEL"),
+            owner_id=owner,
             language=language, persona_file=persona, bot_names=items("BOT_NAMES"),
             persona_emoji="".join(text("PERSONA_EMOJI").split()),
             timezone=tz, database_path=path("DATABASE_PATH", "data/bot.sqlite3"),
@@ -185,6 +207,10 @@ class Settings:
             sports_hour=number("SPORTS_HOUR", 9, 0, 23), sports_results=flag("SPORTS_RESULTS", True),
             sports_check_minutes=number("SPORTS_CHECK_MINUTES", 15, 5, 120),
             sports_idle_hours=number("SPORTS_IDLE_HOURS", 6, 1, 24),
+            sports_teams_file=teams_file if sports_enabled else None,
+            family_file=family_file, praise_enabled=flag("PRAISE_ENABLED", False),
+            praise_weekday=number("PRAISE_WEEKDAY", 5, 0, 6), praise_hour=number("PRAISE_HOUR", 12, 0, 23),
+            birthday_hour=number("BIRTHDAY_HOUR", 9, 0, 23),
             quiet_start_hour=number("QUIET_START_HOUR", 23, 0, 23),
             quiet_end_hour=number("QUIET_END_HOUR", 8, 0, 23),
             max_ai_calls_per_day=number("MAX_AI_CALLS_PER_DAY", 200, 1, 10000),

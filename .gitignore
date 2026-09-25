@@ -8,6 +8,8 @@ data/
 # your own persona with family details
 personas/*.local.md
 *.local.md
+# your family list and team list may hold names and birthdays
+*.local.json
 
 # --- runtime ---
 logs/

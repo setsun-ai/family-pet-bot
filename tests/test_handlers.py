@@ -10,7 +10,7 @@ from aiogram.types import Chat, Message, Update
 from petbot.ai import AIError
 from petbot.handlers import handle, make_router, split_command
 from petbot.i18n import set_language
-from tests.support import FAMILY, ME, OWNER, Harness
+from tests.support import FAMILY, ME, OWNER, TEAM, Harness
 
 
 class HandlerTests(unittest.IsolatedAsyncioTestCase):
@@ -175,10 +175,11 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("/match", self.h.last_text())  # sports are off by default
 
     async def test_custom_sports_command(self):
-        self.h.app.settings = replace(self.h.settings, sports_enabled=True, sports_team_id="1001", sports_command="football")
-        self.h.sports.cached_at = float("inf")  # use the (empty) cache, no network
-        await handle(self.h.message("/football"), self.h.app)
+        self.h.sports.state[TEAM.key].fetched_at = float("inf")  # use the (empty) cache, no network
+        await handle(self.h.message("/riverside"), self.h.app)
         self.assertIn("TheSportsDB", self.h.last_text())
+        await handle(self.h.message("/help"), self.h.app)
+        self.assertIn("/riverside", self.h.last_text())
 
     async def test_russian_interface(self):
         set_language("ru")
@@ -210,3 +211,38 @@ def test_split_command():
     assert split_command("/news@Whiskers_Bot now", "whiskers_bot") == ("news", "now")
     assert split_command("/news@other_bot", "whiskers_bot") == ("__other_bot__", "")
     assert split_command("hello", "whiskers_bot") == ("", "")
+
+
+class MenuTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.h = await Harness().open()
+
+    async def asyncTearDown(self):
+        await self.h.close()
+
+    def menus(self):
+        from aiogram.methods import SetMyCommands
+        return {type(m.scope).__name__ if m.scope else "default": [c.command for c in m.commands]
+                for m in self.h.session.requests if isinstance(m, SetMyCommands)}
+
+    async def test_each_audience_gets_its_menu(self):
+        import re
+
+        from petbot.menus import owner_group_commands, owner_private_commands, publish_menus
+        await publish_menus(self.h.bot, self.h.db, self.h.settings, self.h.sports.teams)
+        menus = self.menus()
+        self.assertIn("riverside", menus["default"])
+        self.assertNotIn("status", menus["default"])  # the family doesn't see admin commands
+        self.assertTrue({"status", "check", "preview", "deliveries"} <= set(menus["BotCommandScopeChat"]))
+        self.assertTrue({"who", "name", "unname", "setup_chat"} <= set(menus["BotCommandScopeChatMember"]))
+        for lang in ("en", "ru"):
+            set_language(lang)
+            for command, description in owner_private_commands(self.h.settings, self.h.sports.teams) + \
+                    owner_group_commands(self.h.settings, self.h.sports.teams):
+                self.assertRegex(command, r"^[a-z0-9_]{1,32}$")
+                self.assertTrue(3 <= len(description) <= 256 and not re.search(r"\{", description), command)
+        set_language("en")
+
+    async def test_setup_chat_refreshes_the_menus(self):
+        await handle(self.h.message("/setup_chat", chat=-2000), self.h.app)
+        self.assertIn("BotCommandScopeChatMember", self.menus())

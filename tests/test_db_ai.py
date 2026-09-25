@@ -17,6 +17,7 @@ from petbot.backup import backup
 from petbot.config import Settings
 from petbot.db import Database
 from petbot.delivery import DeliveryError
+from petbot.sports import Team
 from tests.support import FAMILY, TOKEN, Harness
 
 
@@ -168,8 +169,9 @@ def test_logs_never_contain_secrets():
 
 
 def test_command_menu_follows_features():
-    names = [c for c, _ in bot_commands(Settings(sports_enabled=True, sports_command="football", news_enabled=False))]
-    assert "football" in names and "news" not in names
+    teams = (Team("a", "Riverside", "football", "thesportsdb", "1"), Team("b", "Shakhtar", "shakhtar", "espn", "493"))
+    names = [c for c, _ in bot_commands(Settings(sports_enabled=True, news_enabled=False), teams)]
+    assert "football" in names and "shakhtar" in names and "news" not in names
 
 
 def test_backup_is_consistent_and_rotated(tmp_path):

@@ -10,7 +10,8 @@
 |---|---|---|
 | Messages **addressed to the bot** (reply, @mention, its name, private chat) | always | yes: up to 50 lines per chat, deleted after `HISTORY_DAYS` (30) |
 | Other group messages | never processed | **no**: dropped before touching the database |
-| Telegram user IDs | for access control | yes: owner, allowed users, nicknames |
+| Telegram / Discord user IDs | for access control | yes: owner, allowed users, nicknames |
+| Your family file (`FAMILY_FILE`) | weekly praise, birthdays | it's your own file; the bot stores the last praise texts so they don't repeat |
 | Nicknames set by the owner (`/name`) | always | yes, until `/unname` |
 | Sent posts (news, matches) | for de-duplication | IDs yes; the text of conversation answers is erased once sent |
 
@@ -18,9 +19,9 @@
 
 | Destination | What exactly |
 |---|---|
-| **Telegram** | The bot's messages; Telegram also delivers the messages to the bot. |
-| **Your AI provider** (Anthropic or OpenAI) | For an addressed message: the persona text, the author's name, the message, up to 8 recent lines of *that* chat, and the quoted bot message if it's a reply. For news: the article's title and summary. For match lines: team names and the score. OpenAI requests are sent with `store: false`. Both providers process data under their own terms. |
-| **RSS feeds, TheSportsDB** | Ordinary public HTTPS requests. No personal data. |
+| **Telegram or Discord** | The bot's messages; the app also delivers the messages to the bot. Discord (MESSAGE CONTENT intent) delivers every message of the channels the bot can see; the bot ignores those not addressed to it. |
+| **Your AI provider** (Anthropic or OpenAI) | For an addressed message: the persona text, the author's name, the message, up to 8 recent lines of *that* chat, and the quoted bot message if it's a reply. For news: the article's title and summary. For match posts: teams, score, scorers, table. For weekly praise and birthdays: the person's name and their `about` text from the family file. OpenAI requests are sent with `store: false`. Both providers process data under their own terms. |
+| **RSS feeds, TheSportsDB, ESPN, upl.ua** | Ordinary public HTTPS requests. No personal data. |
 
 Nothing else is sent anywhere: no crash reports, statistics or update checks.
 
@@ -53,7 +54,8 @@ Nothing else is sent anywhere: no crash reports, statistics or update checks.
 |---|---|---|
 | Сообщения, **адресованные боту** (Reply, @упоминание, его имя, личка) | всегда | да: до 50 реплик на чат, удаляются через `HISTORY_DAYS` (30) |
 | Остальные сообщения группы | не обрабатываются | **нет**: отбрасываются до обращения к базе |
-| Telegram ID пользователей | для контроля доступа | да: владелец, разрешённые, домашние имена |
+| Telegram / Discord ID пользователей | для контроля доступа | да: владелец, разрешённые, домашние имена |
+| Ваш файл семьи (`FAMILY_FILE`) | похвала недели, дни рождения | это ваш собственный файл; бот хранит последние тексты похвал, чтобы они не повторялись |
 | Домашние имена от владельца (`/name`) | всегда | да, до `/unname` |
 | Отправленные публикации (новости, матчи) | против дублей | ID да; текст ответов в разговоре стирается после отправки |
 
@@ -61,9 +63,9 @@ Nothing else is sent anywhere: no crash reports, statistics or update checks.
 
 | Куда | Что именно |
 |---|---|
-| **Telegram** | Сообщения бота; Telegram также доставляет сообщения боту. |
-| **Ваш ИИ-провайдер** (Anthropic или OpenAI) | Для обращения: текст персонажа, имя автора, сообщение, до 8 последних реплик *этого* чата и цитируемое сообщение бота, если это Reply. Для новостей: заголовок и краткое содержание статьи. Для реплик о матчах: названия команд и счёт. Запросы к OpenAI отправляются с `store: false`. Оба провайдера обрабатывают данные по своим условиям. |
-| **RSS-ленты, TheSportsDB** | Обычные публичные HTTPS-запросы. Без личных данных. |
+| **Telegram или Discord** | Сообщения бота; мессенджер также доставляет сообщения боту. Discord (MESSAGE CONTENT intent) доставляет все сообщения видимых боту каналов; бот игнорирует те, что не адресованы ему. |
+| **Ваш ИИ-провайдер** (Anthropic или OpenAI) | Для обращения: текст персонажа, имя автора, сообщение, до 8 последних реплик *этого* чата и цитируемое сообщение бота, если это Reply. Для новостей: заголовок и краткое содержание статьи. Для постов о матчах: команды, счёт, авторы голов, таблица. Для похвалы недели и дней рождения: имя человека и его текст `about` из файла семьи. Запросы к OpenAI отправляются с `store: false`. Оба провайдера обрабатывают данные по своим условиям. |
+| **RSS-ленты, TheSportsDB, ESPN, upl.ua** | Обычные публичные HTTPS-запросы. Без личных данных. |
 
 Больше ничего никуда не отправляется: ни отчётов об ошибках, ни статистики, ни проверок обновлений.
 

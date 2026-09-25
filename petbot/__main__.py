@@ -2,8 +2,8 @@
 Command line:
 
     python -m petbot                 run the bot (Ctrl+C to stop)
-    python -m petbot setup           interactive setup: token, AI key, language
-    python -m petbot check           test Telegram, AI (one small paid request), RSS and sports; then exit
+    python -m petbot setup           interactive setup: Telegram or Discord, token, AI key, language
+    python -m petbot check           test Telegram/Discord, AI (one small paid request), RSS and sports; then exit
     python -m petbot check-config    validate .env without any network request
     python -m petbot backup          consistent copy of the database into backups/ (keeps the last 10)
 """
@@ -26,7 +26,7 @@ def main(argv: list[str] | None = None) -> int:
         if stream is not None and hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
 
-    parser = argparse.ArgumentParser(prog="python -m petbot", description="family-pet-bot: an AI pet for your family Telegram chat")
+    parser = argparse.ArgumentParser(prog="python -m petbot", description="family-pet-bot: an AI pet for your family Telegram or Discord chat")
     parser.add_argument("--version", action="version", version=f"family-pet-bot {__version__}")
     parser.add_argument("command", nargs="?", default="run", choices=["run", "setup", "check", "check-config", "backup"])
     parser.add_argument("--log-file", help="also write the log to this file (rotated at 1 MB; used by autostart)")

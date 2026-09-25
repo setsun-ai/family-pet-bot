@@ -1,11 +1,11 @@
 [project]
 name = "family-pet-bot"
-version = "1.0.0"
-description = "An AI pet character for your family Telegram chat: conversation, daily good news and your team's matches. English and Russian."
+version = "1.1.0"
+description = "An AI pet character for your family Telegram or Discord chat: conversation, good news, your teams' matches, weekly praise and birthdays. English and Russian."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
-keywords = ["telegram-bot", "family", "ai", "claude", "openai", "aiogram", "raspberry-pi"]
+keywords = ["telegram-bot", "discord-bot", "family", "ai", "claude", "openai", "aiogram", "discord.py", "raspberry-pi"]
 
 [tool.ruff]
 line-length = 130
@@ -20,3 +20,5 @@ combine-as-imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# discord.py imports audioop (voice) on Python < 3.13; the bot never uses voice
+filterwarnings = ["ignore:'audioop' is deprecated:DeprecationWarning"]

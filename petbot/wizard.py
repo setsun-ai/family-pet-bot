@@ -87,13 +87,19 @@ def _run() -> int:
     text = set_value(text, "LANGUAGE", lang)
     print("\n" + t("wiz_intro") + "\n")
 
-    # Telegram
-    if not current(text, "BOT_TOKEN") or yes(t("wiz_replace_token"), False):
-        print(t("wiz_token_help"))
-        token = getpass.getpass("BOT_TOKEN: ").strip()
-        if not re.fullmatch(r"[1-9]\d{4,15}:[A-Za-z0-9_-]{30,}", token):
+    # Telegram or Discord
+    platform = current(text, "PLATFORM") or "telegram"
+    platform = "discord" if ask(t("wiz_platform"), "2" if platform == "discord" else "1") == "2" else "telegram"
+    text = set_value(text, "PLATFORM", platform)
+    token_name = "BOT_TOKEN" if platform == "telegram" else "DISCORD_TOKEN"
+    token_shape = (r"[1-9]\d{4,15}:[A-Za-z0-9_-]{30,}" if platform == "telegram"
+                   else r"[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{20,}")
+    if not current(text, token_name) or yes(t("wiz_replace_token"), False):
+        print(t("wiz_token_help" if platform == "telegram" else "wiz_token_help_discord"))
+        token = getpass.getpass(token_name + ": ").strip()
+        if not re.fullmatch(token_shape, token):
             raise ValueError(t("wiz_bad_token"))
-        text = set_value(text, "BOT_TOKEN", token)
+        text = set_value(text, token_name, token)
 
     # AI provider
     provider = current(text, "AI_PROVIDER") or "claude"

@@ -1,4 +1,4 @@
-"""Starting the bot: logging with secret redaction, the Telegram polling loop, graceful shutdown."""
+"""Starting the bot: logging with secret redaction, the Telegram polling loop (Discord: discord_bot.py), shutdown."""
 from __future__ import annotations
 
 import asyncio
@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .config import Settings
 from .i18n import t
+from .menus import bot_commands, publish_menus  # noqa: F401  (bot_commands: public API)
 
 
 class RedactingFormatter(logging.Formatter):
@@ -23,6 +24,7 @@ class RedactingFormatter(logging.Formatter):
         for value in self.secrets:
             result = result.replace(value, "[REDACTED]")
         result = re.sub(r"\b\d{5,16}:[A-Za-z0-9_-]{20,}", "[BOT_TOKEN]", result)
+        result = re.sub(r"\b[A-Za-z0-9_-]{24,}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}", "[BOT_TOKEN]", result)  # Discord
         return re.sub(r"\bsk-[A-Za-z0-9_-]{10,}", "[API_KEY]", result)
 
 
@@ -44,35 +46,26 @@ def setup_logging(settings: Settings, log_file: str | None = None) -> None:
     logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
-def bot_commands(settings: Settings) -> list[tuple[str, str]]:
-    """The command menu shown in Telegram (only what is enabled)."""
-    commands = [("help", t("cmd_help"))]
-    if settings.news_enabled:
-        commands.append(("news", t("cmd_news")))
-    if settings.sports_enabled:
-        commands.append((settings.sports_command, t("cmd_sports")))
-    commands += [("forget", t("cmd_forget")), ("privacy", t("cmd_privacy")), ("id", t("cmd_id")),
-                 ("del", t("cmd_del"))]
-    return commands
-
-
 async def run(settings: Settings, check: bool = False) -> int:
+    if settings.platform == "discord":
+        from .discord_bot import run as run_discord
+        return await run_discord(settings, check)
     # The Telegram/HTTP stack is imported only when the bot really runs.
     import httpx
     from aiogram import Bot, Dispatcher
     from aiogram.client.default import DefaultBotProperties
     from aiogram.exceptions import TelegramAPIError
-    from aiogram.types import BotCommand
 
     from .ai import AIService
     from .common import ChatLocks, RateLimiter
     from .db import Database
     from .delivery import DeliveryService
+    from .family import FamilyService, load_family
     from .handlers import App, check_text, make_router
     from .news import NewsService
     from .scheduler import Scheduler
     from .security import AccessControl
-    from .sports import SportsService
+    from .sports import SportsService, teams_from_settings
 
     db = Database(settings.database_path)
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=None))
@@ -90,10 +83,12 @@ async def run(settings: Settings, check: bool = False) -> int:
             ai = AIService(settings, db, client)
             delivery = DeliveryService(bot, db, settings.persona_emoji)
             news = NewsService(settings, db, ai, client, delivery)
-            sports = SportsService(settings, client, ai)
+            sports = SportsService(settings, client, ai, teams_from_settings(settings))
+            family = FamilyService(settings, db, ai, load_family(settings.family_file))
             access = AccessControl(db)
-            scheduler = Scheduler(settings, db, news, sports, delivery)
-            app = App(settings, db, bot, me, ai, news, sports, delivery, access, scheduler, RateLimiter(), ChatLocks())
+            scheduler = Scheduler(settings, db, news, sports, delivery, family)
+            app = App(settings, db, bot, me, ai, news, sports, delivery, access, scheduler, RateLimiter(), ChatLocks(),
+                      family=family)
             if check:
                 print("Telegram: OK — @" + (me.username or str(me.id)))
                 print(await check_text(app))
@@ -104,7 +99,7 @@ async def run(settings: Settings, check: bool = False) -> int:
             dispatcher = Dispatcher()
             dispatcher.include_router(make_router(app))
             await bot.delete_webhook(drop_pending_updates=False)
-            await bot.set_my_commands([BotCommand(command=c, description=d) for c, d in bot_commands(settings)])
+            await publish_menus(bot, db, settings, sports.teams)
             scheduler.start()
             logging.info(t("console_started", username=me.username, tz=settings.timezone))
             try:
