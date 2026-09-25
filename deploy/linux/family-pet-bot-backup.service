@@ -1,0 +1,8 @@
+[Unit]
+Description=family-pet-bot database backup
+
+[Service]
+Type=oneshot
+User=@USER@
+WorkingDirectory=@DIR@
+ExecStart=@DIR@/.venv/bin/python -m petbot backup

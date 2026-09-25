@@ -1,0 +1,20 @@
+# The bot as a system service (Raspberry Pi / Linux server). @USER@/@DIR@ are filled in by install-service.sh.
+[Unit]
+Description=family-pet-bot (Telegram)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=@USER@
+WorkingDirectory=@DIR@
+ExecStart=@DIR@/.venv/bin/python -m petbot
+Environment=PYTHONUNBUFFERED=1 PYTHONUTF8=1
+Restart=on-failure
+RestartSec=30
+# Ctrl+C equivalent: the bot finishes running replies before it stops
+KillSignal=SIGINT
+TimeoutStopSec=30
+Nice=5
+
+[Install]
+WantedBy=multi-user.target
