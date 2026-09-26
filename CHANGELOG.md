@@ -15,6 +15,7 @@ The pet now writes like a family member in a messenger, not like a news robot - 
 - `NEWS_MODE=every2days`; news is 1-2 short messages.
 - `/preview` (owner, private): see any automatic post before the family does.
 - Automatic posts keep a distance from each other (no two posts back to back).
+- Releases: pushing a version tag runs the tests and publishes a GitHub release with notes from this file.
 - Command menus per audience: everyone sees the everyday commands; the owner additionally sees the admin commands in the private chat and the nickname commands in the family group.
 - Quieter bursts: only the first message of a burst notifies; match results arrive silently. Match previews are 1-2 messages, results 2-3.
 - Optional `POST_MODEL`: a stronger model only for the few automatic posts.

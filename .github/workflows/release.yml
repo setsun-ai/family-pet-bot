@@ -1,0 +1,38 @@
+# Pushing a version tag (git tag v1.2.3 && git push origin v1.2.3) publishes a GitHub release:
+# the tag must match pyproject.toml, lint + tests must pass, and the release notes are the
+# matching "## 1.2.3" section of CHANGELOG.md. GitHub attaches the source code archives.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m ruff check .
+      - run: python -m pytest -q
+      - name: The tag matches the version in pyproject.toml
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          grep -q "^version = \"$version\"$" pyproject.toml || { echo "pyproject.toml is not $version"; exit 1; }
+      - name: Release notes from CHANGELOG.md
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '/^## / { if (found) exit; if ($2 == v) { found = 1; next } } found' CHANGELOG.md > notes.md
+          test -s notes.md || { echo "CHANGELOG.md has no section for $version"; exit 1; }
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag

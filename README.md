@@ -24,7 +24,7 @@ Whiskers: Three games, three wins. I only knock the pieces over. Respect 😻
 ## Features
 
 - 🎭 **Your own character.** The personality is a plain text file, with examples in English and Russian. Family names stay in a private `*.local.md` file that is never committed.
-- 💬 **Telegram or Discord.** The same pet in either app: pick one in the setup wizard.
+- 🔀 **Telegram or Discord.** The same pet in either app: pick one in the setup wizard.
 - 💬 **Natural group chat.**
   - It answers replies, @mentions and its name, including grammatical forms: *Мурзика*, *Мурзику*.
   - It remembers the recent conversation per chat.
