@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- CI tests every supported Python (3.11-3.14) on Linux, and 3.11 and 3.14 on Windows and macOS.
+- `pyproject.toml` declares the direct dependencies; `pip install -e .` adds a `family-pet-bot` command. `requirements.txt` stays the pinned set the launchers install.
+- Dependabot opens weekly update PRs for Python packages and GitHub Actions; workflows use `actions/checkout@v7` and `actions/setup-python@v7`.
+
 ## 1.1.0 (2026-09)
 
 The pet now writes like a family member in a messenger, not like a news robot - and it lives in Discord too.

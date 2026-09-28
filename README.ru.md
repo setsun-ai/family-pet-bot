@@ -1,6 +1,7 @@
 # family-pet-bot 🐾
 
 [![CI](https://github.com/setsun-ai/family-pet-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/setsun-ai/family-pet-bot/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/setsun-ai/family-pet-bot)](https://github.com/setsun-ai/family-pet-bot/releases/latest)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 [![Лицензия: MIT](https://img.shields.io/badge/лицензия-MIT-green)](LICENSE)
 

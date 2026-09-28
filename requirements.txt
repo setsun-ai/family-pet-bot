@@ -1,5 +1,6 @@
-# Pinned runtime dependency set; see TEST_REPORT.md for verification scope.
-# Python 3.11-3.14; see TEST_REPORT.md for the tested platform.
+# Pinned runtime dependencies: the exact set run.sh / run.bat install and CI tests.
+# Direct dependencies are declared in pyproject.toml; the rest are theirs, pinned for reproducibility.
+# CI: Python 3.11-3.14 on Linux, 3.11 and 3.14 on Windows and macOS.
 aiofiles==24.1.0
 aiogram==3.31.0
 aiohappyeyeballs==2.6.2
