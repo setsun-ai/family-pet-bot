@@ -1,10 +1,12 @@
-# Lint + tests on Linux, Windows and macOS for every push and pull request.
+# Lint + tests on Linux, Windows and macOS for every pull request and every push to main.
 # No secrets: the tests never talk to Telegram, an AI provider or the internet.
 name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:  # manual run from the Actions tab, e.g. for a branch without a PR
 
 permissions:
   contents: read
