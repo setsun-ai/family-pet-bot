@@ -14,12 +14,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        python: ["3.11", "3.13"]
+        # Every supported Python on Linux; the oldest and newest on Windows and macOS.
+        include:
+          - { os: ubuntu-latest, python: "3.11" }
+          - { os: ubuntu-latest, python: "3.12" }
+          - { os: ubuntu-latest, python: "3.13" }
+          - { os: ubuntu-latest, python: "3.14" }
+          - { os: windows-latest, python: "3.11" }
+          - { os: windows-latest, python: "3.14" }
+          - { os: macos-latest, python: "3.11" }
+          - { os: macos-latest, python: "3.14" }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -33,7 +43,9 @@ jobs:
   scripts:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Shell scripts parse and pass shellcheck (errors only)
         run: |
           for f in run.sh deploy/linux/*.sh; do bash -n "$f"; shellcheck -S error "$f"; done

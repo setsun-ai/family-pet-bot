@@ -12,6 +12,8 @@ python -m venv .venv
 .venv/bin/python -m ruff check .                     # must be clean
 ```
 
+Optional: `.venv/bin/pip install -e .` adds a `family-pet-bot` command (same as `python -m petbot`). Keep it editable (`-e`): the bot looks for `.env`, `data/` and `personas/` in this folder, next to the code.
+
 Start with [How it works](docs/en/how-it-works.md).
 
 ## Rules of thumb
@@ -45,6 +47,7 @@ Found a bug? Open an issue with the output of `/status`, after removing names an
 - Ничего личного в репозитории: персонажи с настоящими людьми хранятся в `*.local.md`.
 - Каждый вызов ИИ должен идти через `AIService.complete` (лимиты), каждая публикация — через `DeliveryService.send` (без дублей).
 - Документацию обновляйте на обоих языках.
+- По желанию: `pip install -e .` добавляет команду `family-pet-bot` (то же, что `python -m petbot`). Только с `-e`: бот ищет `.env`, `data/` и `personas/` в папке проекта, рядом с кодом.
 
 **Идеи для начала:**
 - новые языки;

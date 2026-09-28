@@ -6,6 +6,44 @@ readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
 keywords = ["telegram-bot", "discord-bot", "family", "ai", "claude", "openai", "aiogram", "discord.py", "raspberry-pi"]
+# What the code imports directly. requirements.txt pins the full tested set (these plus their
+# dependencies) and is what run.sh / run.bat and the systemd installer actually install.
+dependencies = [
+    "aiogram>=3.31",
+    "aiohttp>=3.14",
+    "aiosqlite>=0.22",
+    "beautifulsoup4>=4.14",
+    "discord.py>=2.7",
+    "feedparser>=6.0",
+    "filelock>=3.29",
+    "httpx>=0.28",
+    "python-dotenv>=1.2",
+    "tzdata>=2026.2",  # time zones for zoneinfo on Windows, which has no system database
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Communications :: Chat",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+# `pip install -e .` adds a `family-pet-bot` command (same as `python -m petbot`). Editable only:
+# .env, data/ and personas/ are found next to the petbot package, i.e. in this folder.
+[project.scripts]
+family-pet-bot = "petbot.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/setsun-ai/family-pet-bot"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["petbot"]
 
 [tool.ruff]
 line-length = 130
