@@ -3,16 +3,16 @@
 # CI: Python 3.11-3.14 on Linux, 3.11 and 3.14 on Windows and macOS.
 aiofiles==25.1.0
 aiogram==3.31.0
-aiohappyeyeballs==2.6.2
+aiohappyeyeballs==2.7.1
 aiohttp==3.14.3
 aiosignal==1.4.0
 aiosqlite==0.22.1
-annotated-types==0.7.0
-anyio==4.13.0
+annotated-types==0.8.0
+anyio==4.15.1
 attrs==26.1.0
 audioop-lts==0.2.2; python_version >= "3.13"
-beautifulsoup4==4.14.3
-certifi==2026.5.20
+beautifulsoup4==4.15.0
+certifi==2026.7.22
 discord.py==2.7.1
 feedparser==6.0.14
 feedparser-sgmllib==2.1.0
@@ -21,15 +21,15 @@ frozenlist==1.8.0
 h11==0.16.0
 httpcore==1.0.9
 httpx==0.28.1
-idna==3.17
+idna==3.20
 magic-filter==1.0.12
 multidict==6.7.1
-propcache==0.5.2
-pydantic==2.13.4
-pydantic-core==2.46.4
-python-dotenv==1.2.2
-soupsieve==2.8.4
+propcache==0.5.4
+pydantic==2.13.5
+pydantic-core==2.49.0
+python-dotenv==1.2.3
+soupsieve==2.10
 typing-extensions==4.16.0
-typing-inspection==0.4.2
-tzdata==2026.2
-yarl==1.24.2
+typing-inspection==0.4.4
+tzdata==2026.4
+yarl==1.25.1
