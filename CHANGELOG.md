@@ -1,10 +1,13 @@
 # Changelog
 
-## Unreleased
+## 1.1.1 (2026-09)
+
+Maintenance release: no changes in behaviour.
 
 - CI tests every supported Python (3.11-3.14) on Linux, and 3.11 and 3.14 on Windows and macOS.
 - Direct dependencies live in `requirements.in` (read by `pyproject.toml`); `requirements.txt`, the pinned set the launchers install, is generated from it with pip-compile, so Dependabot updates it as one consistent set. `pip install -e .` adds a `family-pet-bot` command.
 - Dependabot opens weekly update PRs for Python packages and GitHub Actions; workflows use `actions/checkout@v7` and `actions/setup-python@v7`.
+- Updated dependencies (all tests pass): `filelock` 4.0, `aiofiles` 25.1, `pydantic` 2.13.5 with `pydantic-core` 2.46.5 and 12 other minor/patch updates.
 
 ## 1.1.0 (2026-09)
 
