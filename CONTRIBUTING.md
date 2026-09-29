@@ -14,6 +14,13 @@ python -m venv .venv
 
 Optional: `.venv/bin/pip install -e .` adds a `family-pet-bot` command (same as `python -m petbot`). Keep it editable (`-e`): the bot looks for `.env`, `data/` and `personas/` in this folder, next to the code.
 
+**Dependencies.** Direct dependencies live in `requirements.in` (`pyproject.toml` reads it). `requirements.txt` is generated from it by [pip-tools](https://pip-tools.readthedocs.io), never edited by hand. After changing `requirements.in`, regenerate it on Python 3.13:
+
+```bash
+pip install pip-tools "click<8.3"
+pip-compile --strip-extras --output-file=requirements.txt requirements.in
+```
+
 Start with [How it works](docs/en/how-it-works.md).
 
 ## Rules of thumb
@@ -47,6 +54,7 @@ Found a bug? Open an issue with the output of `/status`, after removing names an
 - Ничего личного в репозитории: персонажи с настоящими людьми хранятся в `*.local.md`.
 - Каждый вызов ИИ должен идти через `AIService.complete` (лимиты), каждая публикация — через `DeliveryService.send` (без дублей).
 - Документацию обновляйте на обоих языках.
+- Зависимости: прямые — в `requirements.in` (его читает `pyproject.toml`). `requirements.txt` генерируется из него командой `pip-compile --strip-extras --output-file=requirements.txt requirements.in` (Python 3.13, `pip install pip-tools "click<8.3"`) и вручную не редактируется.
 - По желанию: `pip install -e .` добавляет команду `family-pet-bot` (то же, что `python -m petbot`). Только с `-e`: бот ищет `.env`, `data/` и `personas/` в папке проекта, рядом с кодом.
 
 **Идеи для начала:**
