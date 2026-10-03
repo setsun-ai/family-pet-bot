@@ -136,7 +136,7 @@ class Reader:
                                                for lemma, pos, tense in forms
                                                if lemma.replace("ё", "е") in ACHIEVE_VERBS | FAIL_VERBS | WEAK_VERBS)
                 if "болеть" in lemmas and words[i + 1:i + 2] == ["за"]:
-                    continue  # "болею за Полісся" is football, not illness
+                    continue  # "болею за Карпати" is football, not illness
                 if lemmas & ACHIEVE_VERBS or (_morph() is None and _stem_hit(word, ACHIEVE_VERBS)):
                     if not past or plan:
                         continue

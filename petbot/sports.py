@@ -103,14 +103,14 @@ class Standing:
 @dataclass(frozen=True)
 class Team:
     """One followed team (from teams.json or the single-team SPORTS_* settings)."""
-    key: str                 # stable id used in delivery keys, e.g. "polissya"
+    key: str                 # stable id used in delivery keys, e.g. "karpaty"
     name: str                # how the family calls it
     command: str             # Telegram command without "/"
     source: str              # thesportsdb | espn
     team_id: str
     league: str = ""         # espn league slug
     upl: bool = False        # enrich from upl.ua (Ukrainian Premier League)
-    upl_name: str = ""       # the team's name on upl.ua, e.g. "Полісся"
+    upl_name: str = ""       # the team's name on upl.ua, e.g. "Карпати"
     competitions: tuple[str, ...] = ()  # only announce these competitions (empty = all)
     hour: int = 9            # match-day preview window starts at this hour
     results: bool = True
@@ -288,7 +288,7 @@ def _words(name: str) -> list[str]:
 def find_standing(table: dict[str, Standing], name: str) -> Standing | None:
     """
     A team in a table, also across alphabets: the UPL table is in Ukrainian,
-    TheSportsDB/ESPN names are in English ("Полісся" ~ "Polissya Zhytomyr").
+    TheSportsDB/ESPN names are in English ("Карпати" ~ "Karpaty Lviv").
     """
     key = team_key(name)
     if not key:

@@ -95,7 +95,7 @@ class TestChatStyle:
         assert parts[:2] == ["A" * 60, "B" * 60] and sum(map(len, parts)) <= 131
 
     def test_mixed_script_repair(self):
-        assert fix_mixed_script("Полісся 1:0 Криვბас") == "Полісся 1:0 Кривбас"
+        assert fix_mixed_script("Карпати 1:0 Криვბас") == "Карпати 1:0 Кривбас"
         assert fix_mixed_script("გამარჯობა") == "გამარჯობა"
 
     def test_typing_pause(self):

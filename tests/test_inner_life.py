@@ -106,7 +106,7 @@ class MoodServiceTests(unittest.IsolatedAsyncioTestCase):
     ("если поступлю, будет круто", "Аня", None, None),
     ("Сдала?", "Мама", None, None),  # a question
     ("не болею, всё ок", "Папа", None, None),
-    ("болею за Полесье", "Папа", None, None),  # football, not illness
+    ("болею за Карпаты", "Папа", None, None),  # football, not illness
     ("ахахаха он упал с холодильника", "Аня", None, None),  # laughing: not bad news
     ("У нас пока летают только реактивные дроны. Сегодня 5 прилётов", "Мама", "worry", None),
     ("опять тревога", "Папа", "worry", None),
@@ -354,10 +354,10 @@ class CasualMatchTests(unittest.IsolatedAsyncioTestCase):
         await self.h.scheduler.sports_tick(datetime(2026, 10, 10, 9, 30, tzinfo=WARSAW))
         self.assertFalse(self.h.session.sent)  # no morning preview with tables
         self.state.fetched = datetime(2026, 10, 10, 17, 50, tzinfo=WARSAW)
-        self.h.ai.post.return_value = "Полісся вже грає, дивимось?"
+        self.h.ai.post.return_value = "Карпати вже грає, дивимось?"
         await self.h.scheduler.sports_tick(datetime(2026, 10, 10, 17, 55, tzinfo=WARSAW))
         await self.h.scheduler.sports_tick(datetime(2026, 10, 10, 18, 5, tzinfo=WARSAW))
-        self.assertEqual([m.text for m in self.h.session.sent], ["Полісся вже грає, дивимось?"])
+        self.assertEqual([m.text for m in self.h.session.sent], ["Карпати вже грає, дивимось?"])
         task, data = self.h.ai.post.call_args.args
         self.assertEqual(task, "match_kickoff")
         self.assertNotIn("table_position", data)
@@ -486,36 +486,36 @@ class CheerPerPersonTests(unittest.IsolatedAsyncioTestCase):
 
 class PetBirthdayTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.h = await Harness().open(pet_birthday="2018-11-19", timezone="Europe/Warsaw")
+        self.h = await Harness().open(pet_birthday="2019-04-01", timezone="Europe/Warsaw")
         self.h.ai.post.return_value = "Сегодня мой день. Где паштет?"
 
     async def asyncTearDown(self):
         await self.h.close()
 
     async def test_it_celebrates_itself_once_and_knows_its_age(self):
-        day = datetime(2026, 11, 19, 8, 30, tzinfo=WARSAW)
+        day = datetime(2026, 4, 1, 8, 30, tzinfo=WARSAW)
         await self.h.scheduler.family_tick(day)  # before BIRTHDAY_HOUR
         self.assertFalse(self.h.session.sent)
         await self.h.scheduler.family_tick(day.replace(hour=10))
         await self.h.scheduler.family_tick(day.replace(hour=12))
         self.assertEqual([m.text for m in self.h.session.sent], ["Сегодня мой день. Где паштет?"])
         task, facts = self.h.ai.post.call_args.args
-        self.assertEqual((task, facts["age"]), ("pet_birthday", 8))
-        await self.h.scheduler.family_tick(day.replace(day=20, hour=10))
+        self.assertEqual((task, facts["age"]), ("pet_birthday", 7))
+        await self.h.scheduler.family_tick(day.replace(day=2, hour=10))
         self.assertEqual(len(self.h.session.sent), 1)
 
     async def test_royal_all_day(self):
         mood = MoodService(self.h.settings, self.h.db, random.Random(1))
-        self.assertEqual((await mood.current(datetime(2026, 11, 19, 15, 0, tzinfo=WARSAW))).name, "royal")
-        self.assertIsNotNone(await mood.current(datetime(2026, 11, 20, 15, 0, tzinfo=WARSAW)))
+        self.assertEqual((await mood.current(datetime(2026, 4, 1, 15, 0, tzinfo=WARSAW))).name, "royal")
+        self.assertIsNotNone(await mood.current(datetime(2026, 4, 2, 15, 0, tzinfo=WARSAW)))
 
 
 def test_pet_birthday_setting(tmp_path):
     from petbot.config import ConfigError
     from tests.test_core import KEY, env
     base = f"BOT_TOKEN={TOKEN}\nANTHROPIC_API_KEY={KEY}\n"
-    assert Settings.load(env(tmp_path, base + "PET_BIRTHDAY=2018-11-19\n")).pet_birthday == "2018-11-19"
-    assert Settings.load(env(tmp_path, base + "PET_BIRTHDAY=11-19\n")).pet_birthday == "11-19"
+    assert Settings.load(env(tmp_path, base + "PET_BIRTHDAY=2019-04-01\n")).pet_birthday == "2019-04-01"
+    assert Settings.load(env(tmp_path, base + "PET_BIRTHDAY=04-01\n")).pet_birthday == "04-01"
     with pytest.raises(ConfigError, match="PET_BIRTHDAY"):
-        Settings.load(env(tmp_path, base + "PET_BIRTHDAY=19.11\n"))
+        Settings.load(env(tmp_path, base + "PET_BIRTHDAY=01.04\n"))
 

@@ -148,8 +148,8 @@ UPL_REPORT = """<div class="events-container">
 
 UPL_CALENDAR = """<div class="tournaments-games">
   <div class="tour-date">Субота, 04.10.2026</div>
-  <div class="tour-match"><span class="match-tournament">УПЛ</span> Полісся — Динамо <a href="/ua/report/view/111">звіт</a></div>
-  <div class="tour-match"><span class="match-tournament">U19</span> Полісся U19 — Динамо U19 <a href="/ua/report/view/112">звіт</a></div>
+  <div class="tour-match"><span class="match-tournament">УПЛ</span> Карпати — Динамо <a href="/ua/report/view/111">звіт</a></div>
+  <div class="tour-match"><span class="match-tournament">U19</span> Карпати U19 — Динамо U19 <a href="/ua/report/view/112">звіт</a></div>
   <div class="tour-date">Неділя, 05.10.2026</div>
   <div class="tour-match"><span class="match-tournament">УПЛ</span> Шахтар — Зоря <a href="/ua/report/view/113">звіт</a></div>
 </div>"""
@@ -163,11 +163,11 @@ class TestUPL:
         assert parse_upl_goals(UPL_REPORT, "3:0") is None
 
     def test_report_link_of_the_main_league_only(self):
-        assert upl_report_link(UPL_CALENDAR, "Полісся", date(2026, 10, 4)) == "https://upl.ua/ua/report/view/111"
-        assert upl_report_link(UPL_CALENDAR, "Полісся", date(2026, 10, 5)) is None
+        assert upl_report_link(UPL_CALENDAR, "Карпати", date(2026, 10, 4)) == "https://upl.ua/ua/report/view/111"
+        assert upl_report_link(UPL_CALENDAR, "Карпати", date(2026, 10, 5)) is None
 
     def test_team_key(self):
-        assert team_key("ФК «Полісся» (Житомир)") == "полісся" == team_key("Полісся")
+        assert team_key("ФК «Карпати» (Львів)") == "карпати" == team_key("Карпати")
 
 
 class TestFacts:
@@ -193,12 +193,12 @@ class TestFacts:
 
     def test_upl_names_the_family_knows(self):
         from petbot.sports import Standing, Team
-        team = Team("polissya", "Полісся", "polissya", "thesportsdb", "140180", upl=True, upl_name="Полісся")
-        m = replace(parse_tsdb_event(event(strHomeTeam="Polissya Zhytomyr", strAwayTeam="Kryvbas Kryvyi Rih",
-                                           idHomeTeam="140180"), "140180"))
-        table = {"полісся": Standing("Полісся", 1, 7, 18), "кривбас": Standing("Кривбас", 14, 6, 5)}
+        team = Team("karpaty", "Карпати", "karpaty", "thesportsdb", "2002", upl=True, upl_name="Карпати")
+        m = replace(parse_tsdb_event(event(strHomeTeam="Karpaty Lviv", strAwayTeam="Kryvbas Kryvyi Rih",
+                                           idHomeTeam="2002"), "2002"))
+        table = {"карпати": Standing("Карпати", 1, 7, 18), "кривбас": Standing("Кривбас", 14, 6, 5)}
         data = facts(m, team, table, WARSAW)
-        assert (data["home"], data["opponent"]) == ("Полісся", "Кривбас")
+        assert (data["home"], data["opponent"]) == ("Карпати", "Кривбас")
         assert data["table_position"] == {"us": {"position": 1, "points": 18, "played": 7},
                                           "opponent": {"position": 14, "points": 5, "played": 6}}
 
@@ -395,50 +395,50 @@ UPL_CALENDAR_HTML = """<div class="tournaments-games">
  <div class="team first-team">Верес</div><div class="resualt"><a href="/ua/report/view/15923">2 : 1</a></div>
  <div class="team second-team">Кудрівка</div><div class="match-stadium">"Авангард"</div></div>
 <div class="tour-match upl"><div class="match-tournament">UPL</div><div class="match-tour">6</div>
- <div class="team first-team">Полісся</div><div class="resualt"><a href="/ua/report/view/15924">1 : 0</a></div>
+ <div class="team first-team">Карпати</div><div class="resualt"><a href="/ua/report/view/15924">1 : 0</a></div>
  <div class="team second-team">Зоря</div><div class="match-stadium">ім. Г. Тонкочеєва</div></div>
 <div class="tour-date">Ср, 07.10.2026</div>
 <div class="tour-match"><div class="match-tournament">U19</div><div class="match-tour">9</div>
  <div class="team first-team">Карпати</div><div class="resualt"><a href="/ua/report/view/16840">12:00</a></div>
- <div class="team second-team">Полісся</div></div>
+ <div class="team second-team">Карпати</div></div>
 <div class="tour-match"><div class="match-tournament">Beton Cup 1/16</div><div class="match-tour"></div>
  <div class="team first-team">Чернігів</div><div class="resualt"><a href="/ua/report/view/17000">15:00</a></div>
- <div class="team second-team">Полісся</div><div class="match-stadium">"Юність"</div></div>
+ <div class="team second-team">Карпати</div><div class="match-stadium">"Арена"</div></div>
 <div class="tour-date">Нд, 11.10.2026</div>
 <div class="tour-match upl"><div class="match-tournament">UPL</div><div class="match-tour">8</div>
  <div class="team first-team">Буковина</div><div class="resualt"><a href="/ua/report/view/15930">18:00</a></div>
- <div class="team second-team">Полісся</div></div>
+ <div class="team second-team">Карпати</div></div>
 <div class="tour-date">Пн, 12.10.2026</div>
 <div class="tour-match"><div class="match-tournament">UPL2</div><div class="match-tour">8</div>
- <div class="team first-team">Буковина</div><div class="resualt">-</div><div class="team second-team">Полісся</div></div>
+ <div class="team first-team">Буковина</div><div class="resualt">-</div><div class="team second-team">Карпати</div></div>
 </div>"""
 
 
 class TestUplCalendar:
     def test_league_and_cup_only(self):
         from petbot.sports import parse_upl_calendar
-        found = parse_upl_calendar(UPL_CALENDAR_HTML, "Полісся")
+        found = parse_upl_calendar(UPL_CALENDAR_HTML, "Карпати")
         assert [(e["day"].isoformat(), e["tournament"], e["home"], e["away"]) for e in found] == [
-            ("2026-10-03", "UPL", "Полісся", "Зоря"),
-            ("2026-10-07", "Beton Cup 1/16", "Чернігів", "Полісся"),  # the cup, which TheSportsDB doesn't have
-            ("2026-10-11", "UPL", "Буковина", "Полісся"),  # no U19, no UPL-2 (reserves)
+            ("2026-10-03", "UPL", "Карпати", "Зоря"),
+            ("2026-10-07", "Beton Cup 1/16", "Чернігів", "Карпати"),  # the cup, which TheSportsDB doesn't have
+            ("2026-10-11", "UPL", "Буковина", "Карпати"),  # no U19, no UPL-2 (reserves)
         ]
 
     def test_times_scores_and_the_live_trap(self):
         from petbot.sports import KYIV, parse_upl_calendar, parse_upl_kickoff, upl_match
-        today, cup, league = parse_upl_calendar(UPL_CALENDAR_HTML, "Полісся")
+        today, cup, league = parse_upl_calendar(UPL_CALENDAR_HTML, "Карпати")
         kickoff = parse_upl_kickoff('<p>Матч №42 03.10.2026. Субота, 17:00 "Авангард"</p>')
         assert kickoff == datetime(2026, 10, 3, 17, 0, tzinfo=KYIV)
-        during = upl_match(today, "Полісся", datetime(2026, 10, 3, 18, 30, tzinfo=KYIV), kickoff)
+        during = upl_match(today, "Карпати", datetime(2026, 10, 3, 18, 30, tzinfo=KYIV), kickoff)
         assert (during.status, during.score) == ("live", "1:0")  # a score on the page is not a final result yet
-        after = upl_match(today, "Полісся", datetime(2026, 10, 3, 19, 10, tzinfo=KYIV), kickoff)
+        after = upl_match(today, "Карпати", datetime(2026, 10, 3, 19, 10, tzinfo=KYIV), kickoff)
         assert (after.status, after.team_is_home, after.id) == ("finished", True, "upl:15924")
-        unknown = upl_match(today, "Полісся", datetime(2026, 10, 4, 9, 0, tzinfo=KYIV), None)
+        unknown = upl_match(today, "Карпати", datetime(2026, 10, 4, 9, 0, tzinfo=KYIV), None)
         assert unknown.status == "live"  # kick-off unknown: never announced as final
-        upcoming = upl_match(league, "Полісся", datetime(2026, 10, 3, 19, 10, tzinfo=KYIV))
+        upcoming = upl_match(league, "Карпати", datetime(2026, 10, 3, 19, 10, tzinfo=KYIV))
         assert (upcoming.status, upcoming.kickoff, upcoming.team_is_home) == (
             "upcoming", datetime(2026, 10, 11, 18, 0, tzinfo=KYIV), False)
-        assert upl_match(cup, "Полісся", datetime(2026, 10, 3, 19, 10, tzinfo=KYIV)).league == "Beton Cup 1/16"
+        assert upl_match(cup, "Карпати", datetime(2026, 10, 3, 19, 10, tzinfo=KYIV)).league == "Beton Cup 1/16"
         assert upcoming.league.startswith("Українська")
 
 
@@ -463,8 +463,8 @@ class UplScheduleWins(unittest.IsolatedAsyncioTestCase):
                 return _httpx.Response(200, text="<p>03.10.2026. Субота, 13:00</p>")
             return _httpx.Response(404)
 
-        team = Team(key="polissya", name="Полісся", command="polissya", source="thesportsdb", team_id="1001",
-                    upl=True, upl_name="Полісся")
+        team = Team(key="karpaty", name="Карпати", command="karpaty", source="thesportsdb", team_id="1001",
+                    upl=True, upl_name="Карпати")
         async with _httpx.AsyncClient(transport=_httpx.MockTransport(handler)) as client:
             sports = SportsService(Settings(timezone="Europe/Kyiv"), client, None, (team,))
             state = await sports.fetch(team, force=True)

@@ -207,7 +207,7 @@ class Settings:
             try:
                 datetime.strptime(pet_birthday if len(pet_birthday) == 10 else "2000-" + pet_birthday, "%Y-%m-%d")
             except ValueError:
-                raise ConfigError("PET_BIRTHDAY: use MM-DD or YYYY-MM-DD, e.g. 2018-11-19.") from None
+                raise ConfigError("PET_BIRTHDAY: use MM-DD or YYYY-MM-DD, e.g. 2019-04-01.") from None
         reactions_file = path("REACTIONS_FILE", "") if text("REACTIONS_FILE") else None
         if reactions_file is not None and not reactions_file.is_file():
             raise ConfigError(f"REACTIONS_FILE: file not found: {reactions_file}")
