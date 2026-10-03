@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -57,6 +58,8 @@ class Settings:
     news_jitter_minutes: int = 20
     news_max_age_days: int = 7
     news_max_candidates: int = 3
+    news_refresh_days: tuple[int, ...] = (0, 3)  # on_request: restock on Monday and Thursday
+    news_stock_size: int = 5
     max_news_ai_calls_per_day: int = 6
     # sports
     sports_enabled: bool = False
@@ -68,12 +71,24 @@ class Settings:
     sports_check_minutes: int = 15
     sports_idle_hours: int = 6
     sports_teams_file: Path | None = None
+    sports_style: str = "full"  # full = preview + result with analysis; casual = "the match is on, watching?" + score
     # family: weekly praise and birthdays
     family_file: Path | None = None
     praise_enabled: bool = False
-    praise_weekday: int = 5
+    praise_weekday: int = 5  # -1 = a random day every week
     praise_hour: int = 12
+    praise_until_hour: int | None = None  # set = a random minute between praise_hour and this hour
     birthday_hour: int = 9
+    pet_birthday: str = ""  # the pet's own birthday: "MM-DD" or "YYYY-MM-DD" (the year gives its age)
+    # emoji reactions by local keyword rules (no AI)
+    reactions_file: Path | None = None
+    # the pet's inner life
+    mood_enabled: bool = True
+    sentiment_enabled: bool = False  # cheer achievements / react to bad news, by a local dictionary
+    memory_enabled: bool = False  # remember short facts from conversations addressed to the pet
+    memory_days: int = 60
+    spontaneous_per_week: float = 0  # speak up on its own, on average this many times a week
+    chime_in_per_day: int = 0  # join a lively family conversation (by its local "vibe"), at most this often a day
     # quiet hours, limits, memory
     quiet_start_hour: int = 23
     quiet_end_hour: int = 8
@@ -81,6 +96,7 @@ class Settings:
     user_requests_per_minute: int = 6
     ai_timeout: int = 35
     max_input_chars: int = 4000
+    reply_max_chars: int = 300  # an ordinary chat reply; "explain in detail" still gets a long one
     history_messages: int = 8
     history_keep: int = 50
     history_days: int = 30
@@ -162,11 +178,17 @@ class Settings:
             raise ConfigError(f"PERSONA_FILE: file not found: {persona}")
 
         news_mode = text("NEWS_MODE", "alternate").lower() or "alternate"
-        if news_mode not in {"alternate", "once", "twice", "every2days"}:
-            raise ConfigError("NEWS_MODE: use alternate, once, twice or every2days.")
+        if news_mode not in {"alternate", "once", "twice", "every2days", "on_request"}:
+            raise ConfigError("NEWS_MODE: use alternate, once, twice, every2days or on_request.")
+        try:
+            refresh_days = tuple(sorted({int(day) for day in items("NEWS_REFRESH_DAYS") or ("0", "3")}))
+            if not all(0 <= day <= 6 for day in refresh_days):
+                raise ValueError
+        except ValueError:
+            raise ConfigError("NEWS_REFRESH_DAYS: weekdays 0-6 separated by commas (0 = Monday), e.g. 0,3.") from None
         first = number("NEWS_HOUR", 11, 0, 23) * 60 + number("NEWS_MINUTE", 0, 0, 59)
         second = number("NEWS_EVENING_HOUR", 18, 0, 23) * 60 + number("NEWS_EVENING_MINUTE", 30, 0, 59)
-        if news_mode not in {"once", "every2days"} and second - first < 180:
+        if news_mode not in {"once", "every2days", "on_request"} and second - first < 180:
             raise ConfigError("The evening news slot must be at least 3 hours after the first one (NEWS_EVENING_HOUR).")
         feeds = items("NEWS_FEEDS") or DEFAULT_FEEDS
         if any(not feed.startswith("https://") for feed in feeds):
@@ -180,9 +202,27 @@ class Settings:
         family_file = path("FAMILY_FILE", "") if text("FAMILY_FILE") else None
         if family_file is not None and not family_file.is_file():
             raise ConfigError(f"FAMILY_FILE: file not found: {family_file}")
+        pet_birthday = text("PET_BIRTHDAY")
+        if pet_birthday:
+            try:
+                datetime.strptime(pet_birthday if len(pet_birthday) == 10 else "2000-" + pet_birthday, "%Y-%m-%d")
+            except ValueError:
+                raise ConfigError("PET_BIRTHDAY: use MM-DD or YYYY-MM-DD, e.g. 2018-11-19.") from None
+        reactions_file = path("REACTIONS_FILE", "") if text("REACTIONS_FILE") else None
+        if reactions_file is not None and not reactions_file.is_file():
+            raise ConfigError(f"REACTIONS_FILE: file not found: {reactions_file}")
         if sports_enabled and teams_file is None and not team.isdigit():
             raise ConfigError("SPORTS_TEAM_ID: set the numeric TheSportsDB team id (see docs: sports).")
 
+        praise_weekday = -1 if text("PRAISE_WEEKDAY").lower() == "any" else number("PRAISE_WEEKDAY", 5, 0, 6)
+        praise_hour = number("PRAISE_HOUR", 12, 0, 23)
+        praise_until = number("PRAISE_UNTIL_HOUR", 0, 1, 24) if text("PRAISE_UNTIL_HOUR") else None
+        if praise_until is not None and praise_until <= praise_hour:
+            raise ConfigError("PRAISE_UNTIL_HOUR must be later than PRAISE_HOUR.")
+
+        sports_style = text("SPORTS_STYLE", "full").lower() or "full"
+        if sports_style not in {"full", "casual"}:
+            raise ConfigError("SPORTS_STYLE: use full or casual.")
         sports_command = (text("SPORTS_COMMAND", "match") or "match").lstrip("/").lower()
         if not re.fullmatch(r"[a-z0-9_]{1,32}", sports_command):
             raise ConfigError("SPORTS_COMMAND: 1-32 latin letters, digits or _ (command rules of Telegram and Discord).")
@@ -201,20 +241,26 @@ class Settings:
             news_window_minutes=number("NEWS_WINDOW_MINUTES", 120, 1, 720),
             news_jitter_minutes=number("NEWS_JITTER_MINUTES", 20, 0, 45),
             news_max_age_days=number("NEWS_MAX_AGE_DAYS", 7, 1, 30),
+            news_refresh_days=refresh_days, news_stock_size=number("NEWS_STOCK_SIZE", 5, 1, 30),
             max_news_ai_calls_per_day=number("MAX_NEWS_AI_CALLS_PER_DAY", 6, 1, 100),
             sports_enabled=sports_enabled, sports_team_id=team, sports_command=sports_command,
             sports_api_key=text("SPORTS_API_KEY", "3") or "3",
             sports_hour=number("SPORTS_HOUR", 9, 0, 23), sports_results=flag("SPORTS_RESULTS", True),
             sports_check_minutes=number("SPORTS_CHECK_MINUTES", 15, 5, 120),
             sports_idle_hours=number("SPORTS_IDLE_HOURS", 6, 1, 24),
-            sports_teams_file=teams_file if sports_enabled else None,
+            sports_teams_file=teams_file if sports_enabled else None, sports_style=sports_style,
             family_file=family_file, praise_enabled=flag("PRAISE_ENABLED", False),
-            praise_weekday=number("PRAISE_WEEKDAY", 5, 0, 6), praise_hour=number("PRAISE_HOUR", 12, 0, 23),
-            birthday_hour=number("BIRTHDAY_HOUR", 9, 0, 23),
+            praise_weekday=praise_weekday, praise_hour=praise_hour, praise_until_hour=praise_until,
+            birthday_hour=number("BIRTHDAY_HOUR", 9, 0, 23), reactions_file=reactions_file, pet_birthday=pet_birthday,
+            mood_enabled=flag("MOOD_ENABLED", True), sentiment_enabled=flag("SENTIMENT_ENABLED", False),
+            memory_enabled=flag("MEMORY_ENABLED", False), memory_days=number("MEMORY_DAYS", 60, 1, 365),
+            spontaneous_per_week=number("SPONTANEOUS_PER_WEEK", 0, 0, 7),
+            chime_in_per_day=number("CHIME_IN_PER_DAY", 0, 0, 10),
             quiet_start_hour=number("QUIET_START_HOUR", 23, 0, 23),
             quiet_end_hour=number("QUIET_END_HOUR", 8, 0, 23),
             max_ai_calls_per_day=number("MAX_AI_CALLS_PER_DAY", 200, 1, 10000),
             user_requests_per_minute=number("USER_REQUESTS_PER_MINUTE", 6, 1, 60),
             ai_timeout=number("AI_TIMEOUT_SECONDS", 35, 5, 120),
+            reply_max_chars=number("REPLY_MAX_CHARS", 300, 60, 2000),
             history_days=number("HISTORY_DAYS", 30, 1, 365),
         )

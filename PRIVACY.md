@@ -9,7 +9,9 @@
 | Data | When | Stored locally? |
 |---|---|---|
 | Messages **addressed to the bot** (reply, @mention, its name, private chat) | always | yes: up to 50 lines per chat, deleted after `HISTORY_DAYS` (30) |
-| Other group messages | never processed | **no**: dropped before touching the database |
+| Other group messages | only with `REACTIONS_FILE` or `SENTIMENT_ENABLED`: read locally (keyword rules, a dictionary) to maybe add an emoji reaction or a short cheer; of pictures only the fact that one was sent and the caption | **no**: never stored, never sent to the AI |
+| Facts the pet remembers (`MEMORY_ENABLED`) | taken from messages addressed to it | yes: up to 40 short facts per chat, deleted after `MEMORY_DAYS` (60); `/memory`, `/forget` |
+| Reactions and replies to the pet's own messages | for `/stats` | yes: message id, user id, emoji; deleted after 90 days |
 | Telegram / Discord user IDs | for access control | yes: owner, allowed users, nicknames |
 | Your family file (`FAMILY_FILE`) | weekly praise, birthdays | it's your own file; the bot stores the last praise texts so they don't repeat |
 | Nicknames set by the owner (`/name`) | always | yes, until `/unname` |
@@ -53,7 +55,9 @@ Nothing else is sent anywhere: no crash reports, statistics or update checks.
 | Данные | Когда | Хранится локально? |
 |---|---|---|
 | Сообщения, **адресованные боту** (Reply, @упоминание, его имя, личка) | всегда | да: до 50 реплик на чат, удаляются через `HISTORY_DAYS` (30) |
-| Остальные сообщения группы | не обрабатываются | **нет**: отбрасываются до обращения к базе |
+| Остальные сообщения группы | только с `REACTIONS_FILE` или `SENTIMENT_ENABLED`: читаются локально (правила, словарь), чтобы, может быть, поставить реакцию или коротко похвалить | **нет**: не сохраняются и не отправляются ИИ |
+| Факты, которые питомец запомнил (`MEMORY_ENABLED`) | из сообщений, обращённых к нему | да: до 40 коротких фактов на чат, удаляются через `MEMORY_DAYS` (60); `/memory`, `/forget` |
+| Реакции и ответы на сообщения самого питомца | для `/stats` | да: ID сообщения, ID пользователя, эмодзи; удаляются через 90 дней |
 | Telegram / Discord ID пользователей | для контроля доступа | да: владелец, разрешённые, домашние имена |
 | Ваш файл семьи (`FAMILY_FILE`) | похвала недели, дни рождения | это ваш собственный файл; бот хранит последние тексты похвал, чтобы они не повторялись |
 | Домашние имена от владельца (`/name`) | всегда | да, до `/unname` |

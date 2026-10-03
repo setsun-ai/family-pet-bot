@@ -42,7 +42,7 @@ First step for anything: `/status` in a private chat with the bot. Next: `/check
 
 **Can the pet search the internet?** No. In conversation it has no web access and is told not to invent current facts. News comes from RSS and matches from TheSportsDB, never from the model's imagination.
 
-**Does it read all our messages?** No. In the group, only messages addressed to it (a reply, an @mention or its name) are processed, stored and sent to the AI. With Group Privacy off, Telegram delivers all group messages to the bot, and it ignores the rest without storing them. See [PRIVACY.md](../../PRIVACY.md).
+**Does it read all our messages?** No. In the group, only messages addressed to it (a reply, an @mention or its name) are processed, stored and sent to the AI. With Group Privacy off, Telegram delivers all group messages to the bot, and it ignores the rest without storing them (with `REACTIONS_FILE` set, it only checks them against your local keyword rules for an emoji reaction). See [PRIVACY.md](../../PRIVACY.md).
 
 **Several groups?** One family group per bot, by design. For another family, run another bot with its own token and folder.
 

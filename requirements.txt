@@ -36,6 +36,8 @@ certifi==2026.7.22
     #   aiogram
     #   httpcore
     #   httpx
+dawg2-python==0.9.0
+    # via pymorphy3
 discord-py==2.7.1
     # via -r requirements.in
 feedparser==6.0.14
@@ -73,6 +75,10 @@ pydantic==2.13.5
     # via aiogram
 pydantic-core==2.46.5
     # via pydantic
+pymorphy3==2.0.6
+    # via -r requirements.in
+pymorphy3-dicts-ru==2.4.417150.4580142
+    # via pymorphy3
 python-dotenv==1.2.3
     # via -r requirements.in
 soupsieve==2.10

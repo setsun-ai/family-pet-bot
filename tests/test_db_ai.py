@@ -1,6 +1,7 @@
 """SQLite (owner, spending limits, deliveries, migration), the AI client and log redaction."""
 import json
 import logging
+import random
 import sqlite3
 import tempfile
 import unittest
@@ -11,12 +12,13 @@ import httpx
 from aiogram.exceptions import TelegramNetworkError
 from aiogram.methods import SendMessage
 
-from petbot.ai import AIError, AIService
+from petbot.ai import LENGTH_HINTS, AIError, AIService
 from petbot.app import RedactingFormatter, bot_commands
 from petbot.backup import backup
 from petbot.config import Settings
 from petbot.db import Database
 from petbot.delivery import DeliveryError
+from petbot.i18n import prompt
 from petbot.sports import Team
 from tests.support import FAMILY, TOKEN, Harness
 
@@ -132,6 +134,30 @@ class AITests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Whiskers", body["system"])  # the persona file
         self.assertIn("Anna: hello", body["messages"][-1]["content"])
         self.assertNotIn("sk-ant-secret", body["system"])  # secrets never go into prompts
+
+    async def test_chat_reply_length_varies_and_is_capped(self):
+        long = "Мрр. " * 200
+        ai = self.service(body={"content": [{"type": "text", "text": long}], "stop_reason": "end_turn"})
+        ai.rng = random.Random(5)
+        hints = set()
+        for _ in range(30):
+            ai.cooldown_until = 0
+            answer = await ai.chat([], "hello", "Anna")
+            self.assertLessEqual(len(answer), self.settings.reply_max_chars)
+            system = json.loads(self.requests[-1].content)["system"]
+            hints |= {key for key in LENGTH_HINTS if prompt(key) in system}
+        self.assertEqual(hints, set(LENGTH_HINTS))  # sometimes two words, sometimes a sentence
+        ai.cooldown_until = 0
+        await ai.chat([], "explain in detail please", "Anna")
+        self.assertFalse(any(prompt(key) in json.loads(self.requests[-1].content)["system"] for key in LENGTH_HINTS))
+
+    async def test_thinking_is_off_for_one_liners(self):
+        for model, expected in (("claude-sonnet-5-5", {"type": "between_tools"}), ("claude-sonnet-5", {"type": "disabled"}),
+                                ("claude-haiku-4-5-20251001", None)):
+            ai = self.service(settings=replace(self.settings, model=model))
+            await ai.chat([], "hi", "A")
+            ai.cooldown_until = 0
+            self.assertEqual(json.loads(self.requests[-1].content).get("thinking"), expected, model)
 
     async def test_http_errors_become_clear_messages(self):
         with self.assertRaises(AIError) as ctx:

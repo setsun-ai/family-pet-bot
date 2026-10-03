@@ -41,6 +41,9 @@ class TestSettings:
         ("SPORTS_ENABLED=true", "SPORTS_TEAM_ID"),
         ("SPORTS_COMMAND=матч", "SPORTS_COMMAND"),
         ("NEWS_FEEDS=http://insecure.example/feed", "NEWS_FEEDS"),
+        ("PRAISE_WEEKDAY=someday", "PRAISE_WEEKDAY"),
+        ("PRAISE_UNTIL_HOUR=10", "PRAISE_UNTIL_HOUR"),
+        ("REACTIONS_FILE=missing.json", "REACTIONS_FILE"),
     ])
     def test_invalid_values_are_explained(self, tmp_path, line, message):
         base = {"BOT_TOKEN": TOKEN, "ANTHROPIC_API_KEY": KEY}
@@ -56,6 +59,13 @@ class TestSettings:
         assert s.bot_names == ("Whiskers", "Мурзик")
         assert s.news_feeds == ("https://a.example/rss", "https://b.example/rss")
         assert s.sports_command == "football" and s.display_name == "Whiskers"
+
+    def test_random_praise_settings(self, tmp_path):
+        s = Settings.load(env(tmp_path, f"BOT_TOKEN={TOKEN}\nANTHROPIC_API_KEY={KEY}\nPRAISE_WEEKDAY=any\n"
+                                        "PRAISE_HOUR=11\nPRAISE_UNTIL_HOUR=21\n"))
+        assert (s.praise_weekday, s.praise_hour, s.praise_until_hour) == (-1, 11, 21)
+        s = Settings.load(env(tmp_path, f"BOT_TOKEN={TOKEN}\nANTHROPIC_API_KEY={KEY}\n"))
+        assert (s.praise_weekday, s.praise_hour, s.praise_until_hour) == (5, 12, None)  # unchanged default
 
     def test_secrets_are_not_in_repr(self, tmp_path):
         s = Settings.load(env(tmp_path, f"BOT_TOKEN={TOKEN}\nANTHROPIC_API_KEY={KEY}\n"))

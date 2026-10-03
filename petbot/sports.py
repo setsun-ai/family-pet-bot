@@ -23,7 +23,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field, replace
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time as dt_time, timedelta
 from difflib import SequenceMatcher
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -41,6 +41,11 @@ ESPN_SITE = "https://site.api.espn.com/apis/site/v2/sports/soccer/{league}"
 ESPN_STANDINGS = "https://site.api.espn.com/apis/v2/sports/soccer/{league}/standings"
 UPL_CALENDAR = "https://upl.ua/ua/tournaments/games"
 UPL_HOME = "https://upl.ua/ua"
+KYIV = ZoneInfo("Europe/Kyiv")  # upl.ua times are Kyiv time
+# The main team's competitions on upl.ua: the league ("UPL") and the cup; not UPL-2 (reserves) or U19.
+UPL_MAIN = re.compile(r"^(?:UPL|УПЛ)$|cup|кубок", re.I)
+# upl.ua shows the score while a match is still on; it's final only this long after kick-off.
+FULL_TIME = timedelta(minutes=125)
 
 FINISHED = {"FT", "AET", "PEN", "AOT", "MATCH FINISHED", "FINISHED", "AFTER PENALTIES", "AFTER EXTRA TIME",
             "STATUS_FULL_TIME", "STATUS_FINAL", "STATUS_FINAL_AET", "STATUS_FINAL_PEN"}
@@ -346,6 +351,65 @@ def parse_upl_standings(html: bytes | str) -> dict[str, Standing]:
     raise ServiceError("sports_table_unrecognized")
 
 
+def parse_upl_calendar(calendar_html: bytes | str, team: str) -> list[dict]:
+    """
+    The team's matches in the upl.ua calendar (today and later, plus today's results): league and cup only.
+    A cell holds either the kick-off time ("18:00") or the score ("2 : 1", also while the match is on).
+    """
+    soup = BeautifulSoup(calendar_html, "html.parser")
+    current: date | None = None
+    found = []
+    for el in soup.select(".tournaments-games .tour-date, .tournaments-games .tour-match"):
+        if "tour-date" in el.get("class", []):
+            day = re.search(r"(\d{2})\.(\d{2})\.(\d{4})", el.get_text(" ", strip=True))
+            current = date(int(day[3]), int(day[2]), int(day[1])) if day else None
+            continue
+        tournament = " ".join((el.select_one(".match-tournament") or el).get_text(" ", strip=True).split())
+        sides = [" ".join(t.get_text(" ", strip=True).split()) for t in el.select(".team")]
+        if current is None or len(sides) != 2 or not UPL_MAIN.search(tournament):
+            continue
+        if not any(team.casefold() == side.casefold() for side in sides):
+            continue
+        cell = " ".join((el.select_one(".resualt") or el).get_text(" ", strip=True).split())
+        link = el.select_one("a[href*='/report/view/']")
+        href = str(link["href"]) if link else ""
+        stadium = el.select_one(".match-stadium")
+        found.append({
+            "day": current, "tournament": tournament, "home": sides[0][:100], "away": sides[1][:100],
+            "time": re.fullmatch(r"(\d{1,2}):(\d{2})", cell), "score": re.fullmatch(r"(\d{1,2})\s+:\s+(\d{1,2})", cell),
+            "link": ("https://upl.ua" + href if href.startswith("/") else href),
+            "venue": " ".join(stadium.get_text(" ", strip=True).split())[:200] if stadium else "",
+        })
+    return found
+
+
+def parse_upl_kickoff(report_html: bytes | str) -> datetime | None:
+    """The kick-off on a upl.ua match page: "03.10.2026. Субота, 13:00" (Kyiv time)."""
+    text = BeautifulSoup(report_html, "html.parser").get_text(" ", strip=True)
+    found = re.search(r"(\d{2})\.(\d{2})\.(\d{4})\.?\s*[^\d,]{2,15},\s*(\d{1,2}):(\d{2})", text)
+    if not found:
+        return None
+    day, month, year, hour, minute = (int(x) for x in found.groups())
+    return datetime(year, month, day, hour, minute, tzinfo=KYIV)
+
+
+def upl_match(entry: dict, team: str, now: datetime, kickoff: datetime | None = None) -> Match:
+    """A calendar entry as a Match. A score counts as final only FULL_TIME after kick-off."""
+    if entry["time"]:
+        kickoff = datetime.combine(entry["day"], dt_time(int(entry["time"][1]), int(entry["time"][2])), tzinfo=KYIV)
+    score = f"{entry['score'][1]}:{entry['score'][2]}" if entry["score"] else None
+    if score:
+        status = "finished" if kickoff and now >= kickoff + FULL_TIME else "live"
+    else:
+        status = "upcoming"
+    report = re.search(r"/report/view/(\d+)", entry["link"])
+    match_id = "upl:" + (report[1] if report else f"{entry['day']}:{team_key(entry['home'])}-{team_key(entry['away'])}")
+    league = "Українська Прем'єр-ліга" if re.fullmatch(r"UPL|УПЛ", entry["tournament"], re.I) else entry["tournament"]
+    return Match(id=match_id, home=entry["home"], away=entry["away"], league=league[:100], status=status,
+                 kickoff=kickoff, score=score, venue=entry["venue"], team_is_home=entry["home"].casefold() == team.casefold(),
+                 url=entry["link"])
+
+
 def upl_report_link(calendar_html: bytes | str, team: str, day: date) -> str | None:
     """The match report of `team` on `day` (main league only)."""
     soup = BeautifulSoup(calendar_html, "html.parser")
@@ -487,6 +551,7 @@ class SportsService:
         self.settings, self.client, self.ai, self.teams = settings, client, ai, teams
         self.state: dict[str, TeamState] = {team.key: TeamState() for team in teams}
         self.lock = asyncio.Lock()
+        self.upl_kickoffs: dict[str, datetime | None] = {}  # report link -> kick-off (the calendar hides it once a score shows)
 
     def team(self, command: str) -> Team | None:
         return next((team for team in self.teams if team.command == command), None)
@@ -538,9 +603,37 @@ class SportsService:
         past = sorted((m for m in parse_tsdb(prev, "results", team.team_id) if m.kickoff), key=lambda m: m.kickoff)
         upcoming, last = (future[0] if future else None), (past[-1] if past else None)
         table: dict[str, Standing] = {}
+        if team.upl and team.upl_name:
+            # upl.ua is the official, complete schedule (cup included); TheSportsDB's free key misses matches.
+            try:
+                upl_next, upl_last = await self._upl_schedule(team)
+                upcoming = upl_next or upcoming
+                if upl_last and (last is None or (last.kickoff and upl_last.kickoff and upl_last.kickoff >= last.kickoff)):
+                    last = upl_last
+            except ServiceError as error:
+                log.info("UPL calendar unavailable, TheSportsDB only: %s", error)
         if team.upl:
             table, last = await self._upl_enrich(team, last)
         return upcoming, last, table
+
+    async def _upl_schedule(self, team: Team) -> tuple[Match | None, Match | None]:
+        calendar = await fetch_bytes(self.client, UPL_CALENDAR)
+        entries = await asyncio.to_thread(parse_upl_calendar, calendar, team.upl_name)
+        now = datetime.now(UTC)
+        matches = []
+        for entry in entries:
+            kickoff = None
+            if entry["score"] and entry["link"]:
+                if entry["link"] not in self.upl_kickoffs:
+                    try:
+                        self.upl_kickoffs[entry["link"]] = parse_upl_kickoff(await fetch_bytes(self.client, entry["link"]))
+                    except ServiceError:
+                        pass  # unknown kick-off: the score stays "live" (never announced too early)
+                kickoff = self.upl_kickoffs.get(entry["link"])
+            matches.append(upl_match(entry, team.upl_name, now, kickoff))
+        ahead = [m for m in matches if m.status in {"upcoming", "live"}]
+        done = [m for m in matches if m.status == "finished"]
+        return (ahead[0] if ahead else None), (done[-1] if done else None)
 
     async def _upl_enrich(self, team: Team, last: Match | None):
         """Full UPL table + scorers of the last match. Optional: failures only drop the extras."""
@@ -610,7 +703,7 @@ class SportsService:
         if self.ai is None or not team.analysis:
             return "", data
         try:
-            return await self.ai.post(task, data, max_parts=max_parts, maximum=500), data
+            return await self.ai.post(task, data, max_parts=max_parts, maximum=380), data
         except ServiceError:
             return "", data
 
@@ -625,10 +718,54 @@ class SportsService:
                 text += f"\n⏰ {local:%H:%M} {data['home']} — {data['away']}"  # same message, no extra one
         return text
 
+    async def kickoff_message(self, team: Team, match: Match) -> str:
+        """SPORTS_STYLE=casual: one line at kick-off, like a fan calling the family to the TV. No table, no stats."""
+        data = facts(match, team, {}, self.settings.tz)
+        short = {k: data[k] for k in ("our_team", "opponent", "we_play_at_home", "competition")}
+        if self.ai is not None and team.analysis:
+            try:
+                return await self.ai.post("match_kickoff", short, max_parts=1, maximum=160)
+            except ServiceError:
+                pass
+        return t("sports_kickoff", team=team.name, opponent=data["opponent"])
+
+    async def casual_result(self, team: Team, match: Match) -> str:
+        """SPORTS_STYLE=casual: the score and an emotion, one line."""
+        if match.status != "finished" or not match.score:
+            raise ValueError("only confirmed final results may be announced")
+        data = facts(match, team, {}, self.settings.tz)
+        ours, theirs = (match.score.split(":") if match.team_is_home else match.score.split(":")[::-1])
+        short = {"our_team": team.name, "opponent": data["opponent"], "score_ours_first": f"{ours}:{theirs}",
+                 "result_for_our_team": match.outcome()}
+        text = ""
+        if self.ai is not None and team.analysis:
+            try:
+                text = await self.ai.post("match_result_casual", short, max_parts=1, maximum=160)
+            except ServiceError:
+                pass
+        if not text:
+            return describe(match, self.settings.tz)
+        if not mentions_score(text, match.score):
+            text = f"{ours}:{theirs}. {text}"
+        return text
+
+    async def ignored_result(self, team: Team, match: Match) -> str:
+        """Nobody answered the kick-off call: one sulky, ironic line ("Ага."), the score optional."""
+        data = facts(match, team, {}, self.settings.tz)
+        ours, theirs = (match.score.split(":") if match.team_is_home else match.score.split(":")[::-1])
+        short = {"our_team": team.name, "opponent": data["opponent"], "score_ours_first": f"{ours}:{theirs}",
+                 "result_for_our_team": match.outcome()}
+        if self.ai is not None and team.analysis:
+            try:
+                return await self.ai.post("match_result_ignored", short, max_parts=1, maximum=120)
+            except ServiceError:
+                pass
+        return t("sports_ignored")
+
     async def result_message(self, team: Team, match: Match, next_match: Match | None) -> str:
         if match.status != "finished" or not match.score:
             raise ValueError("only confirmed final results may be announced")
-        text, data = await self._write("match_result", team, match, next_match, max_parts=3)
+        text, data = await self._write("match_result", team, match, next_match, max_parts=2)
         if not text:
             return describe(match, self.settings.tz)
         if not mentions_score(text, match.score):

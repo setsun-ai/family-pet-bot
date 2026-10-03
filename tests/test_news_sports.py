@@ -8,8 +8,9 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from petbot.ai import NewsDecision
-from petbot.common import ServiceError
+from petbot.common import ServiceError, asks_for_news
 from petbot.config import Settings
+from petbot.handlers import handle
 from petbot.news import parse_feed
 from petbot.persona import split_messages
 from petbot.scheduler import morning_due, news_count, news_plan, quiet_time, result_due
@@ -331,3 +332,141 @@ class NewsAndSportsPosting(unittest.IsolatedAsyncioTestCase):
         state.fetched = now
         await self.h.scheduler._team_tick(replace(TEAM, hour=now.hour), FAMILY, now)
         self.assertEqual(len(self.h.session.sent), 2)  # right after the news - the preview waits
+
+
+class NewsOnRequest(unittest.IsolatedAsyncioTestCase):
+    """NEWS_MODE=on_request: no scheduled posts; a stock of ready stories, restocked twice a week."""
+
+    async def asyncSetUp(self):
+        self.h = await Harness().open(news_mode="on_request", news_stock_size=2, timezone="Europe/Warsaw")
+        items = [rss(title=f"Story {n}", link=f"https://example.org/{n}", date=f"{n + 3:02d} Sep 2026 09:00:00 GMT")
+                 for n in range(1, 5)]
+        parsed = [a for raw in items for a in parse_feed(raw, datetime(2026, 9, 10, 12, 0, tzinfo=UTC))]
+        self.h.news.cached = sorted(parsed, key=lambda a: a.published, reverse=True)  # as articles() sorts them
+        self.h.news.cached_at = float("inf")
+
+    async def asyncTearDown(self):
+        await self.h.close()
+
+    async def test_restock_then_instant_answers_without_ai(self):
+        monday = datetime(2026, 9, 7, 11, 30, tzinfo=WARSAW)
+        await self.h.scheduler.news_tick(monday)  # first run: fills the stock, posts nothing
+        self.assertFalse(self.h.session.sent)
+        self.assertEqual(len(await self.h.db.stock(FAMILY)), 2)
+        self.assertEqual(self.h.ai.news.await_count, 2)  # stops once the stock is full
+        reviews = self.h.ai.news.await_count
+        self.assertTrue(await self.h.news.publish(FAMILY))  # /news
+        self.assertIn("https://example.org/4", self.h.last_text())  # the newest first
+        await handle(self.h.message("Whiskers, any news?", chat=FAMILY, mid=50), self.h.app)
+        self.assertIn("https://example.org/3", self.h.last_text())
+        self.assertEqual(self.h.ai.news.await_count, reviews)  # no AI while people wait
+        self.h.ai.chat.assert_not_called()
+        self.assertEqual(await self.h.db.stock(FAMILY), [])
+
+    async def test_restock_days(self):
+        await self.h.db.set("news_restocked", "2026-09-07")
+        await self.h.scheduler.news_tick(datetime(2026, 9, 9, 12, 0, tzinfo=WARSAW))  # Wednesday: not a refresh day
+        self.h.ai.news.assert_not_called()
+        await self.h.scheduler.news_tick(datetime(2026, 9, 10, 10, 0, tzinfo=WARSAW))  # Thursday, before NEWS_HOUR
+        self.h.ai.news.assert_not_called()
+        await self.h.scheduler.news_tick(datetime(2026, 9, 10, 11, 5, tzinfo=WARSAW))
+        self.assertEqual(self.h.ai.news.await_count, 2)
+        await self.h.scheduler.news_tick(datetime(2026, 9, 10, 15, 0, tzinfo=WARSAW))  # once a day
+        self.assertEqual(self.h.ai.news.await_count, 2)
+        self.assertFalse(self.h.session.sent)
+
+    async def test_i_have_news_is_a_normal_conversation(self):
+        await self.h.news.restock(FAMILY, NOW)
+        await handle(self.h.message("Whiskers, I have news: I passed!", chat=FAMILY, mid=51), self.h.app)
+        self.h.ai.chat.assert_called_once()
+
+
+@pytest.mark.parametrize("text, wanted", [
+    ("Мурзик, есть новости?", True), ("расскажи хорошую новость", True), ("any good news?", True),
+    ("Whiskers, news?", True), ("у меня новость: я сдала", False), ("I have news for you", False),
+])
+def test_news_request_detection(text, wanted):
+    assert asks_for_news(text) is wanted
+
+
+UPL_CALENDAR_HTML = """<div class="tournaments-games">
+<div class="tour-date">Сб, 03.10.2026</div>
+<div class="tour-match upl"><div class="match-tournament">UPL</div><div class="match-tour">6</div>
+ <div class="team first-team">Верес</div><div class="resualt"><a href="/ua/report/view/15923">2 : 1</a></div>
+ <div class="team second-team">Кудрівка</div><div class="match-stadium">"Авангард"</div></div>
+<div class="tour-match upl"><div class="match-tournament">UPL</div><div class="match-tour">6</div>
+ <div class="team first-team">Полісся</div><div class="resualt"><a href="/ua/report/view/15924">1 : 0</a></div>
+ <div class="team second-team">Зоря</div><div class="match-stadium">ім. Г. Тонкочеєва</div></div>
+<div class="tour-date">Ср, 07.10.2026</div>
+<div class="tour-match"><div class="match-tournament">U19</div><div class="match-tour">9</div>
+ <div class="team first-team">Карпати</div><div class="resualt"><a href="/ua/report/view/16840">12:00</a></div>
+ <div class="team second-team">Полісся</div></div>
+<div class="tour-match"><div class="match-tournament">Beton Cup 1/16</div><div class="match-tour"></div>
+ <div class="team first-team">Чернігів</div><div class="resualt"><a href="/ua/report/view/17000">15:00</a></div>
+ <div class="team second-team">Полісся</div><div class="match-stadium">"Юність"</div></div>
+<div class="tour-date">Нд, 11.10.2026</div>
+<div class="tour-match upl"><div class="match-tournament">UPL</div><div class="match-tour">8</div>
+ <div class="team first-team">Буковина</div><div class="resualt"><a href="/ua/report/view/15930">18:00</a></div>
+ <div class="team second-team">Полісся</div></div>
+<div class="tour-date">Пн, 12.10.2026</div>
+<div class="tour-match"><div class="match-tournament">UPL2</div><div class="match-tour">8</div>
+ <div class="team first-team">Буковина</div><div class="resualt">-</div><div class="team second-team">Полісся</div></div>
+</div>"""
+
+
+class TestUplCalendar:
+    def test_league_and_cup_only(self):
+        from petbot.sports import parse_upl_calendar
+        found = parse_upl_calendar(UPL_CALENDAR_HTML, "Полісся")
+        assert [(e["day"].isoformat(), e["tournament"], e["home"], e["away"]) for e in found] == [
+            ("2026-10-03", "UPL", "Полісся", "Зоря"),
+            ("2026-10-07", "Beton Cup 1/16", "Чернігів", "Полісся"),  # the cup, which TheSportsDB doesn't have
+            ("2026-10-11", "UPL", "Буковина", "Полісся"),  # no U19, no UPL-2 (reserves)
+        ]
+
+    def test_times_scores_and_the_live_trap(self):
+        from petbot.sports import KYIV, parse_upl_calendar, parse_upl_kickoff, upl_match
+        today, cup, league = parse_upl_calendar(UPL_CALENDAR_HTML, "Полісся")
+        kickoff = parse_upl_kickoff('<p>Матч №42 03.10.2026. Субота, 17:00 "Авангард"</p>')
+        assert kickoff == datetime(2026, 10, 3, 17, 0, tzinfo=KYIV)
+        during = upl_match(today, "Полісся", datetime(2026, 10, 3, 18, 30, tzinfo=KYIV), kickoff)
+        assert (during.status, during.score) == ("live", "1:0")  # a score on the page is not a final result yet
+        after = upl_match(today, "Полісся", datetime(2026, 10, 3, 19, 10, tzinfo=KYIV), kickoff)
+        assert (after.status, after.team_is_home, after.id) == ("finished", True, "upl:15924")
+        unknown = upl_match(today, "Полісся", datetime(2026, 10, 4, 9, 0, tzinfo=KYIV), None)
+        assert unknown.status == "live"  # kick-off unknown: never announced as final
+        upcoming = upl_match(league, "Полісся", datetime(2026, 10, 3, 19, 10, tzinfo=KYIV))
+        assert (upcoming.status, upcoming.kickoff, upcoming.team_is_home) == (
+            "upcoming", datetime(2026, 10, 11, 18, 0, tzinfo=KYIV), False)
+        assert upl_match(cup, "Полісся", datetime(2026, 10, 3, 19, 10, tzinfo=KYIV)).league == "Beton Cup 1/16"
+        assert upcoming.league.startswith("Українська")
+
+
+class UplScheduleWins(unittest.IsolatedAsyncioTestCase):
+    async def test_upl_overrides_a_wrong_or_missing_thesportsdb_date(self):
+        import httpx as _httpx
+
+        from petbot.sports import KYIV, SportsService, Team
+        tsdb_next = json.dumps({"events": [event(strTimestamp="2026-10-10T15:00:00")]}).encode()
+        tsdb_last = json.dumps({"results": [event(idEvent="1", strStatus="FT", intHomeScore="1", intAwayScore="0",
+                                                  strTimestamp="2026-09-18T13:00:00")]}).encode()
+
+        def handler(request):
+            url = str(request.url)
+            if "eventsnext" in url:
+                return _httpx.Response(200, content=tsdb_next)
+            if "eventslast" in url:
+                return _httpx.Response(200, content=tsdb_last)
+            if url.endswith("/tournaments/games"):
+                return _httpx.Response(200, text=UPL_CALENDAR_HTML)
+            if "/report/view/15924" in url:
+                return _httpx.Response(200, text="<p>03.10.2026. Субота, 13:00</p>")
+            return _httpx.Response(404)
+
+        team = Team(key="polissya", name="Полісся", command="polissya", source="thesportsdb", team_id="1001",
+                    upl=True, upl_name="Полісся")
+        async with _httpx.AsyncClient(transport=_httpx.MockTransport(handler)) as client:
+            sports = SportsService(Settings(timezone="Europe/Kyiv"), client, None, (team,))
+            state = await sports.fetch(team, force=True)
+        assert state.upcoming.kickoff.astimezone(KYIV).date().isoformat() == "2026-10-07"  # the cup match comes first
+        assert (state.last.id, state.last.score, state.last.status) == ("upl:15924", "1:0", "finished")

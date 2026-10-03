@@ -25,14 +25,16 @@ import discord
 from discord import app_commands
 
 from .ai import AIService
-from .common import ChatLocks, RateLimiter, ServiceError, limit_text, names_pattern
+from .common import ChatLocks, RateLimiter, ServiceError, asks_for_news, limit_text, names_pattern
 from .config import Settings
-from .core import check_text, help_text, preview_text, status_text
+from .core import check_text, help_text, memory_text, mood_text, preview_text, stats_text, status_text
 from .db import Database
 from .delivery import RATE_LIMITED, REJECTED, UNCERTAIN, Delivery
 from .family import FamilyService
 from .i18n import t
+from .mood import MoodService
 from .news import NewsService
+from .notice import Noticer
 from .persona import filter_emoji, split_messages, valid_nickname
 from .scheduler import Scheduler
 from .security import GROUP, PRIVATE, AccessControl
@@ -43,7 +45,7 @@ LIMIT = 1900  # Discord allows 2000 characters per message
 NO_PINGS = discord.AllowedMentions.none()
 # View Channel + Send Messages + Read Message History
 INVITE_PERMISSIONS = 1024 | 2048 | 65536
-BUILTIN = {"help", "news", "forget", "privacy", "id", "claim", "setup_channel", "status", "check", "preview",
+BUILTIN = {"help", "news", "forget", "privacy", "id", "claim", "setup_channel", "status", "check", "preview", "mood", "memory", "stats",
            "users", "allow", "deny", "deliveries", "retry_delivery", "names", "name", "unname", "who"}
 
 
@@ -97,6 +99,8 @@ class DiscordApp:
     limiter: RateLimiter
     locks: ChatLocks
     family: FamilyService | None = None
+    noticer: Noticer | None = None
+    mood: MoodService | None = None
     last_check_ok: bool = False
     active_tasks: set[asyncio.Task] = field(default_factory=set)
 
@@ -122,7 +126,9 @@ async def handle_message(app: DiscordApp, message: discord.Message) -> None:
     """A normal (non-slash) message: typed /claim in DMs, or conversation."""
     s = app.settings
     me = app.client.user
-    if me is None or message.author.bot or message.webhook_id or not message.content:
+    media = any((a.content_type or "").startswith(("image/", "video/")) for a in message.attachments) or \
+        bool(message.stickers)
+    if me is None or message.author.bot or message.webhook_id or not (message.content or media):
         return
     if (datetime.now(UTC) - message.created_at).total_seconds() > 300:
         return
@@ -131,6 +137,14 @@ async def handle_message(app: DiscordApp, message: discord.Message) -> None:
     if not app.limiter.allow(f"flood:{user.id}", 20):
         return
     text = message.clean_content.strip()  # mentions become readable @names
+    if not is_private:
+        app.scheduler.note_activity(chat_id, text=text)
+    if media and not is_private and app.noticer and not (app.names and app.names.search(text)) and \
+            me not in message.mentions and await app.access.allowed(user.id, chat_id, GROUP):
+        await app.noticer.notice(app, chat_id, message.id, user.id, text, message.add_reaction, media=True)
+        return
+    if not text:
+        return
 
     claim = re.fullmatch(r"/?claim\s+(\S+)", text, re.I)
     if claim:  # typed instead of picked from the menu
@@ -147,10 +161,17 @@ async def handle_message(app: DiscordApp, message: discord.Message) -> None:
     replied = await _replied_message(message)
     to_me = replied is not None and replied.author.id == me.id
     if not is_private and not (to_me or me in message.mentions or (app.names and app.names.search(text))):
+        if app.noticer:
+            await app.noticer.notice(app, chat_id, message.id, user.id, text, message.add_reaction)
         return
+    if to_me:
+        await app.db.add_feedback(chat_id, replied.id, user.id, "↩")
     if len(text) > s.max_input_chars:
         await message.channel.send(t("too_long", n=s.max_input_chars))
         return
+    if s.news_enabled and asks_for_news(text) and app.limiter.allow(f"news:{chat_id}", 1, 60):
+        if await app.news.from_stock(chat_id):
+            return
     if not app.limiter.allow(f"ai:{user.id}", s.user_requests_per_minute):
         await message.channel.send(t("too_many"))
         return
@@ -164,9 +185,19 @@ async def handle_message(app: DiscordApp, message: discord.Message) -> None:
         display_name = nickname or user.display_name or t("someone")
         async with message.channel.typing():
             answer = await app.ai.chat(history, text, display_name, reply_context=replied.content if to_me else None,
-                                       verified_name=nickname is not None)
+                                       verified_name=nickname is not None, chat_id=chat_id)
         if await app.delivery.send(chat_id, answer, [("dialog", str(message.id))], message.id):
             await app.db.save_exchange(chat_id, f"{display_name[:100]}: {text}", answer, s.history_keep)
+
+
+async def reaction_event(app: DiscordApp, payload: discord.RawReactionActionEvent, added: bool) -> None:
+    """A reaction on one of the pet's messages, for /stats."""
+    me = app.client.user
+    if me is None or payload.user_id == me.id or payload.channel_id != await app.db.family():
+        return
+    if await app.db.sent_kind(payload.channel_id, payload.message_id) is None:
+        return
+    await app.db.add_feedback(payload.channel_id, payload.message_id, payload.user_id, str(payload.emoji), added)
 
 
 async def claim_owner(app: DiscordApp, user_id: int, code: str, answer) -> None:
@@ -289,6 +320,12 @@ async def cmd_team(app, interaction, team) -> None:
 async def cmd_status(app, interaction) -> None:
     if await _gate(app, interaction, owner=True):
         await respond(interaction, await status_text(app), app)
+
+
+async def cmd_owner_text(app, interaction, make) -> None:
+    """/mood, /memory, /stats: an owner-only text from core.py, visible only to the owner."""
+    if await _gate(app, interaction, owner=True):
+        await respond(interaction, await make(), app)
 
 
 async def cmd_check(app, interaction) -> None:
@@ -450,6 +487,15 @@ def build_tree(app: DiscordApp, client: discord.Client) -> app_commands.CommandT
     async def who(interaction: discord.Interaction, user: discord.User):
         await cmd_who(app, interaction, user)
 
+    async def mood(interaction: discord.Interaction, which: str = ""):
+        await cmd_owner_text(app, interaction, lambda: mood_text(app, which))
+
+    async def memory(interaction: discord.Interaction, delete: str = ""):
+        await cmd_owner_text(app, interaction, lambda: memory_text(app, f"del {delete}" if delete else ""))
+
+    async def stats(interaction: discord.Interaction):
+        await cmd_owner_text(app, interaction, lambda: stats_text(app))
+
     add("help", t("cmd_help"), help_)
     if app.settings.news_enabled:
         add("news", t("cmd_news"), news)
@@ -468,6 +514,9 @@ def build_tree(app: DiscordApp, client: discord.Client) -> app_commands.CommandT
     add("status", t("cmd_status"), status, owner=True)
     add("check", t("cmd_check"), check, owner=True)
     add("preview", t("cmd_preview"), preview, owner=True, what=t("opt_what"))
+    add("mood", t("cmd_mood"), mood, owner=True, which=t("opt_mood"))
+    add("memory", t("cmd_memory"), memory, owner=True, delete=t("opt_memory_delete"))
+    add("stats", t("cmd_stats"), stats, owner=True)
     add("allow", t("dcmd_allow"), allow, owner=True, user=t("opt_user"))
     add("deny", t("dcmd_deny"), deny, owner=True, user=t("opt_user"))
     add("users", t("cmd_users"), users, owner=True)
@@ -531,6 +580,18 @@ class PetClient(discord.Client):
             if task is not None:
                 self.app.active_tasks.discard(task)
 
+    async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
+        try:
+            await reaction_event(self.app, payload, True)
+        except Exception as error:
+            log.warning("Reaction event failed (%s)", type(error).__name__)
+
+    async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent) -> None:
+        try:
+            await reaction_event(self.app, payload, False)
+        except Exception as error:
+            log.warning("Reaction event failed (%s)", type(error).__name__)
+
     async def on_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
         original = getattr(error, "original", error)
         text = "⚠️ " + str(original) if isinstance(original, ServiceError) else t("internal_error")
@@ -545,7 +606,10 @@ class PetClient(discord.Client):
 async def run(settings: Settings, check: bool = False) -> int:
     import httpx
 
+    from .app import make_noticer
     from .family import load_family
+    from .mood import MoodService as Moods
+    from .spontaneous import Spontaneous
     from .sports import teams_from_settings
 
     logging.getLogger("discord").setLevel(logging.WARNING)
@@ -568,8 +632,12 @@ async def run(settings: Settings, check: bool = False) -> int:
             family = FamilyService(settings, db, ai, load_family(settings.family_file))
             access = AccessControl(db)
             scheduler = Scheduler(settings, db, news, sports, delivery, family)
+            mood = Moods(settings, db) if settings.mood_enabled else None
+            ai.mood = mood
+            scheduler.spontaneous = Spontaneous(settings, db, ai, delivery, mood)
             client.app = DiscordApp(settings, db, client, ai, news, sports, delivery, access, scheduler,
-                                    RateLimiter(), ChatLocks(), family=family)
+                                    RateLimiter(), ChatLocks(), family=family, mood=mood,
+                                    noticer=make_noticer(settings, family, "discord"))
             if check:
                 await client.login(settings.bot_token)  # validates the token; no gateway connection
                 print(f"Discord: OK — {client.user}")

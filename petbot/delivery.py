@@ -61,7 +61,7 @@ class Delivery:
         group = await self.db.reserve_delivery(chat_id, keys, MESSAGE_BREAK.join(parts))
         if group is None:
             return False
-        await self._send(group, chat_id, parts, reply_to, sound=sound)
+        await self._send(group, chat_id, parts, reply_to, sound=sound, kind=keys[0][0] if keys else "")
         return True
 
     async def _typing(self, chat_id: int, text: str) -> None:
@@ -71,8 +71,8 @@ class Delivery:
         await asyncio.sleep(typing_pause(text))
 
     async def _send(self, group: str, chat_id: int, parts: list[str], reply_to: int | None = None,
-                    *, sound: str = "first") -> None:
-        sent_any, last_id = False, None
+                    *, sound: str = "first", kind: str = "") -> None:
+        sent_any, last_id, ids = False, None, []
         for index, part in enumerate(parts):
             try:
                 if index:
@@ -80,6 +80,8 @@ class Delivery:
                 last_id = await self._post(chat_id, part, reply_to if index == 0 else None,
                                            silent=sound == "none" or index > 0)
                 sent_any = True
+                if last_id is not None:
+                    ids.append(last_id)
             except asyncio.CancelledError:
                 await self.db.finish_delivery(group, "uncertain", "cancelled")
                 raise
@@ -105,12 +107,17 @@ class Delivery:
         # Never retry if the success acknowledgement cannot be saved locally.
         await self.db.finish_delivery(group, "sent", message_id=last_id)
         self.last_error = None
+        if kind and ids:
+            try:  # only for /stats - never a reason to treat a sent message as failed
+                await self.db.remember_sent(chat_id, ids, kind)
+            except Exception as error:
+                log.warning("Could not record a sent message (%s)", type(error).__name__)
 
     async def retry(self, delivery_id: int) -> bool:
         row = await self.db.take_retry(delivery_id)
         if not row:
             return False
-        await self._send(row["group_id"], row["chat_id"], split_messages(row["text"]))
+        await self._send(row["group_id"], row["chat_id"], split_messages(row["text"]), kind=row["kind"])
         return True
 
 

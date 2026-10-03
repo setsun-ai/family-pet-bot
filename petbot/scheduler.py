@@ -11,6 +11,8 @@ import asyncio
 import hashlib
 import json
 import logging
+import random
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
@@ -24,7 +26,10 @@ from .news import NewsService
 from .sports import Match, SportsService, Team
 
 log = logging.getLogger(__name__)
-POST_KINDS = ("news", "sports-preview", "sports-result", "praise", "birthday")
+# Talk about the match in the family chat: someone answered the pet's "watching?" without replying to it.
+MATCH_TALK = re.compile(r"смотр|гляну|дивим|дивлюс|включ|матч|гол\b|голы|счёт|счет|забил|судь|футбол|"
+                        r"watch|match|goal|score", re.I)
+POST_KINDS = ("news", "sports-preview", "sports-kickoff", "sports-result", "praise", "birthday", "spontaneous", "chime")
 
 
 @dataclass(frozen=True)
@@ -44,7 +49,8 @@ def quiet_time(now: datetime, settings: Settings) -> bool:
 
 def news_count(day: date, settings: Settings) -> int:
     parity = (day - date(2026, 1, 1)).days % 2 == 0
-    return {"once": 1, "twice": 2, "every2days": 1 if parity else 0}.get(settings.news_mode, 2 if parity else 1)
+    return {"once": 1, "twice": 2, "every2days": 1 if parity else 0, "on_request": 0}.get(settings.news_mode,
+                                                                                         2 if parity else 1)
 
 
 def news_plan(now: datetime, settings: Settings, chat_id: int = 0) -> list[NewsSlot]:
@@ -77,6 +83,13 @@ def morning_due(match: Match | None, now: datetime, settings: Settings, hour: in
     return start <= local < start + timedelta(hours=3) and now < match.kickoff
 
 
+def kickoff_due(match: Match | None, now: datetime) -> bool:
+    """SPORTS_STYLE=casual: from 10 minutes before kick-off until 20 minutes into the match."""
+    if match is None or match.status not in {"upcoming", "live"} or match.kickoff is None:
+        return False
+    return match.kickoff - timedelta(minutes=10) <= now <= match.kickoff + timedelta(minutes=20)
+
+
 def result_due(match: Match | None, now: datetime) -> bool:
     """A confirmed final result of a match that started within the last 18 hours."""
     if match is None or match.status != "finished" or not match.kickoff:
@@ -89,8 +102,19 @@ class Scheduler:
                  delivery: DeliveryService, family: FamilyService | None = None):
         self.settings, self.db, self.news, self.sports, self.delivery = settings, db, news, sports, delivery
         self.family = family
+        self.spontaneous = None  # Spontaneous, set by the app when SPONTANEOUS_PER_WEEK > 0
+        self.activity: dict[int, datetime] = {}  # chat -> when someone last wrote there (in memory only)
+        self.match_talk: dict[int, datetime] = {}  # chat -> when someone last wrote about a match
+        self.rng = random.Random()
         self.tasks: list[asyncio.Task] = []
         self.last_errors: dict[str, str] = {}
+
+    def note_activity(self, chat_id: int, when: datetime | None = None, text: str = "") -> None:
+        when = when or datetime.now(self.settings.tz)
+        self.activity[chat_id] = when
+        names = "|".join(re.escape(team.name) for team in self.sports.teams)
+        if text and (MATCH_TALK.search(text) or (names and re.search(names, text, re.I))):
+            self.match_talk[chat_id] = when
 
     def start(self) -> None:
         if self.tasks:
@@ -102,6 +126,8 @@ class Scheduler:
             jobs.append(("sports", self.sports_tick, 60))  # local tick; HTTP polling is adaptive
         if self.family and self.family.members:
             jobs.append(("family", self.family_tick, 60))
+        if self.spontaneous and self.settings.spontaneous_per_week > 0:
+            jobs.append(("spontaneous", self.spontaneous_tick, 60))
         for name, function, interval in jobs:
             self.tasks.append(asyncio.create_task(self._loop(name, function, interval), name="scheduler-" + name))
 
@@ -134,6 +160,9 @@ class Scheduler:
         chat = await self.db.family()
         if not chat or quiet_time(now, self.settings):
             return
+        if self.settings.news_mode == "on_request":
+            await self._restock(chat, now)
+            return
         for slot in news_plan(now, self.settings, chat):
             if not slot.start <= now < slot.end or await self.db.has_delivery(chat, "daily", slot.key):
                 continue
@@ -144,6 +173,17 @@ class Scheduler:
                 continue
             await self.news.publish(chat, slot.key, now=now)
             return
+
+    async def _restock(self, chat: int, now: datetime) -> None:
+        """On a refresh day from NEWS_HOUR (or right away when the stock has never been filled)."""
+        s, local = self.settings, now.astimezone(self.settings.tz)
+        last = await self.db.get("news_restocked")
+        start = local.replace(hour=s.news_hour, minute=s.news_minute, second=0, microsecond=0)
+        due = last is None or (local.weekday() in s.news_refresh_days and local >= start and last != local.date().isoformat())
+        if not due or not await self.db.claim_scheduled_attempt(chat, "restock:" + local.date().isoformat(), now):
+            return
+        await self.news.restock(chat, now)
+        await self.db.set("news_restocked", local.date().isoformat())
 
     # --- sports ---
     def _poll_interval(self, team: Team, now: datetime) -> timedelta:
@@ -179,6 +219,9 @@ class Scheduler:
         if quiet_time(now, self.settings) or await self._recent_post(chat, now, 10):
             return
         upcoming, last = state.upcoming, state.last
+        if self.settings.sports_style == "casual":
+            await self._casual_tick(team, chat, now, upcoming, last)
+            return
         if morning_due(upcoming, now, self.settings, team.hour):
             key = f"{team.key}:{upcoming.id}"
             if not await self.db.has_delivery(chat, "sports-preview", key):
@@ -190,6 +233,34 @@ class Scheduler:
             if not await self.db.has_delivery(chat, "sports-result", key):
                 await self.delivery.send(chat, await self.sports.result_message(team, last, upcoming), [("sports-result", key)],
                                          sound="none")  # results arrive quietly
+
+    async def _casual_tick(self, team: Team, chat: int, now: datetime, upcoming: Match | None, last: Match | None) -> None:
+        if kickoff_due(upcoming, now):
+            key = f"{team.key}:{upcoming.id}"
+            if not await self.db.has_delivery(chat, "sports-kickoff", key):
+                await self.delivery.send(chat, await self.sports.kickoff_message(team, upcoming), [("sports-kickoff", key)])
+                return
+        if team.results and result_due(last, now):
+            key = f"{team.key}:{last.id}"
+            if await self.db.has_delivery(chat, "sports-result", key) or await self.db.get("match-quiet:" + key):
+                return
+            called = await self.db.delivery_time(chat, "sports-kickoff", key)
+            if called is None or await self._watched(chat, called):
+                text = await self.sports.casual_result(team, last)
+            elif self.rng.random() < 0.7:
+                text = await self.sports.ignored_result(team, last)  # "Ага." - nobody answered "watching?"
+            else:
+                await self.db.set("match-quiet:" + key, now.isoformat())  # sulking in silence, decided once
+                return
+            await self.delivery.send(chat, text, [("sports-result", key)], sound="none")
+
+    async def _watched(self, chat: int, called: datetime) -> bool:
+        """Did anyone react to the kick-off call: a reply to it, a word to the pet, or talk about the match?"""
+        if await self.db.replies_since(chat, "sports-kickoff", called - timedelta(minutes=1)):
+            return True
+        spoke = await self.db.last_delivery_at(chat, ("dialog",))
+        talk = self.match_talk.get(chat)
+        return bool((spoke and spoke >= called) or (talk and talk >= called))
 
     # --- family ---
     async def family_tick(self, now: datetime | None = None) -> None:
@@ -205,8 +276,14 @@ class Scheduler:
                         await self.db.claim_scheduled_attempt(chat, "birthday:" + key, now):
                     await self.delivery.send(chat, await self.family.birthday_text(member, local), [("birthday", key)])
                     return
+            if self.family.pet_birthday_today(local):
+                key = f"{local.year}:pet"
+                if not await self.db.has_delivery(chat, "birthday", key) and \
+                        await self.db.claim_scheduled_attempt(chat, "birthday:" + key, now):
+                    await self.delivery.send(chat, await self.family.pet_birthday_text(local), [("birthday", key)])
+                    return
         s = self.settings
-        if s.praise_enabled and praise_due(local, s.praise_weekday, s.praise_hour):
+        if s.praise_enabled and praise_due(local, s.praise_weekday, s.praise_hour, s.praise_until_hour, str(chat)):
             week = week_key(local)
             if await self.db.has_delivery(chat, "praise", week) or \
                     not await self.db.claim_scheduled_attempt(chat, "praise:" + week, now):
@@ -219,5 +296,12 @@ class Scheduler:
                 await self.db.set("praise_rotation", json.dumps(rotation, ensure_ascii=False))
                 await self.family.remember_praise(member, text)
 
+    async def spontaneous_tick(self, now: datetime | None = None) -> None:
+        now = now or datetime.now(self.settings.tz)
+        chat = await self.db.family()
+        if not chat or quiet_time(now, self.settings) or await self._recent_post(chat, now, 60):
+            return
+        await self.spontaneous.tick(chat, now, self.activity.get(chat))
+
     async def cleanup_tick(self) -> None:
-        await self.db.cleanup(self.settings.history_days)
+        await self.db.cleanup(self.settings.history_days, self.settings.memory_days)

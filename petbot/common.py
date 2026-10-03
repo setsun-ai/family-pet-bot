@@ -95,6 +95,17 @@ class ChatLocks:
                 self.entries[chat_id] = (lock, count - 1)
 
 
+# "Any news?" / "Есть новости?" - a request for a story, not "I have news: ...".
+NEWS_REQUEST = re.compile(
+    r"\b(?:any|got|tell|share|some|good)\b.{0,25}\bnews\b|\bnews\s*\?|"
+    r"\b(?:есть|расскажи|расскажешь|давай|какие|подкинь|покажи|хочу|хорош\w*|добр\w*|свеж\w*)\b.{0,25}новост|"
+    r"новост\w*\s*\?", re.IGNORECASE)
+
+
+def asks_for_news(text: str) -> bool:
+    return bool(NEWS_REQUEST.search(text))
+
+
 def names_pattern(names: tuple[str, ...]) -> re.Pattern | None:
     """
     Wake words for group chats. Each name also matches short inflected forms

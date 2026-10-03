@@ -12,7 +12,7 @@ from aiogram.methods import SendMessage
 from petbot.common import ServiceError
 from petbot.config import Settings
 from petbot.delivery import typing_pause
-from petbot.family import FamilyService, Member, load_family, next_in_rotation, praise_due, week_key
+from petbot.family import FamilyService, Member, load_family, next_in_rotation, praise_due, praise_slot, week_key
 from petbot.handlers import handle
 from petbot.persona import fix_mixed_script, split_messages, tidy_messages
 from tests.support import FAMILY, OWNER, Harness
@@ -45,6 +45,22 @@ class TestRotation:
         assert week_key(SATURDAY_NOON) == "2026-W40"
         assert praise_due(SATURDAY_NOON, 5, 12) and not praise_due(SATURDAY_NOON, 4, 12)
         assert not praise_due(SATURDAY_NOON.replace(hour=15), 5, 12)
+
+    def test_random_slot_is_stable_within_a_week_and_moves_between_weeks(self):
+        slots = [praise_slot(SATURDAY_NOON + timedelta(weeks=w), -1, 11, 21, "-1000") for w in range(12)]
+        for week, slot in enumerate(slots):
+            now = SATURDAY_NOON + timedelta(weeks=week)
+            assert week_key(slot) == week_key(now)  # inside its own week
+            assert 11 <= slot.hour < 21
+            # every tick of the week sees the same moment
+            assert praise_slot(slot - timedelta(days=slot.weekday()), -1, 11, 21, "-1000") == slot
+            assert praise_due(slot, -1, 11, 21, "-1000") and not praise_due(slot - timedelta(minutes=1), -1, 11, 21, "-1000")
+        assert len({(s.weekday(), s.hour, s.minute) for s in slots}) > 6  # not a weekly cron job
+        assert len({s.weekday() for s in slots}) > 2
+
+    def test_fixed_day_with_random_minute(self):
+        slot = praise_slot(SATURDAY_NOON, 5, 12, 18, "x")
+        assert slot.weekday() == 5 and 12 <= slot.hour < 18
 
 
 class TestFamilyFile:

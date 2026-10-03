@@ -5,10 +5,12 @@ deliver them. `app` is either platform's App: both have the same services.
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from .common import ServiceError
+from .family import PRAISE_WINDOW, praise_slot, week_key
 from .i18n import t, weekday_name
+from .mood import MOODS
 from .scheduler import news_plan
 
 
@@ -44,7 +46,12 @@ async def status_text(app) -> str:
     ]
     if s.news_enabled:
         times = ", ".join(f"{slot.start:%H:%M}–{slot.end:%H:%M}" for slot in slots)
-        lines += [t("status_news", mode=s.news_mode, times=times),
+        if s.news_mode == "on_request":
+            days = ", ".join(weekday_name(day) for day in s.news_refresh_days)
+            lines.append(t("status_news_stock", n=len(await app.db.stock(await app.db.family() or 0)), days=days,
+                           hour=f"{s.news_hour:02d}:{s.news_minute:02d}",
+                           last=await app.db.get("news_restocked") or t("status_not_yet")))
+        lines += [t("status_news", mode=s.news_mode, times=times or "—"),
                   t("status_news_ai", used=await app.db.category_usage(today, "news"), limit=s.max_news_ai_calls_per_day),
                   t("status_rss", value=app.news.last_error or none)]
     else:
@@ -61,8 +68,17 @@ async def status_text(app) -> str:
         lines.append(t("status_family", n=len(app.family.members), birthdays=birthdays))
         if s.praise_enabled:
             member, _ = await app.family.choose()
-            lines.append(t("status_praise", day=weekday_name(s.praise_weekday), hour=s.praise_hour,
+            chat = await app.db.family()
+            args = (s.praise_weekday, s.praise_hour, s.praise_until_hour, str(chat))
+            slot = praise_slot(now, *args)
+            if now >= slot + PRAISE_WINDOW or (chat and await app.db.has_delivery(chat, "praise", week_key(now))):
+                slot = praise_slot(now + timedelta(weeks=1), *args)
+            lines.append(t("status_praise", day=weekday_name(slot.weekday()), time=f"{slot:%d.%m %H:%M}",
                            name=member.name if member else none))
+    if getattr(app, "mood", None):
+        mood = await app.mood.current()
+        until = app.mood.until()
+        lines.append(t("status_mood", mood=mood.label, until=f"{until:%H:%M}" if until else "—"))
     lines += [
         t("status_nicknames", n=len(await app.db.family_names())),
         t("status_delivery", value=app.delivery.last_error or none),
@@ -102,6 +118,56 @@ async def check_text(app) -> str:
     return "\n".join(lines)
 
 
+async def mood_text(app, args: str) -> str:
+    """/mood - the current mood; /mood <name> - set it for 3 hours (owner)."""
+    if not getattr(app, "mood", None):
+        return t("mood_off")
+    names = ", ".join(MOODS)
+    wanted = args.strip().lower()
+    if wanted:
+        if wanted not in MOODS:
+            return t("mood_usage", names=names)
+        mood = await app.mood.force(wanted)
+        return t("mood_set", mood=mood.label)
+    mood = await app.mood.current()
+    until = app.mood.until()
+    return t("mood_now", mood=mood.label, until=f"{until:%H:%M}" if until else "—", names=names)
+
+
+async def memory_text(app, args: str) -> str:
+    """/memory - what the pet remembers about the family chat; /memory del N - forget one fact (owner)."""
+    if not app.settings.memory_enabled:
+        return t("memory_off")
+    chat = await app.db.family()
+    if not chat:
+        return t("status_chat_unset")
+    parts = args.split()
+    if len(parts) == 2 and parts[0] in {"del", "delete", "forget"} and parts[1].isdigit():
+        return t("memory_deleted") if await app.db.delete_memory(chat, int(parts[1])) else t("memory_missing")
+    rows = await app.db.memories(chat, app.settings.memory_days)
+    if not rows:
+        return t("memory_empty")
+    tz = app.settings.tz
+    body = "\n".join(f"{r['id']}. {datetime.fromisoformat(r['created_at']).astimezone(tz):%d.%m} {r['fact']}" for r in rows)
+    return t("memory_list", facts=body)
+
+
+async def stats_text(app, days: int = 30) -> str:
+    """/stats - which posts the family reacts to (owner). Telegram reports reactions only to group admins."""
+    chat = await app.db.family()
+    rows = await app.db.feedback_stats(chat, days) if chat else []
+    if not rows:
+        return t("stats_empty")
+    lines = [t("stats_title", days=days)]
+    for row in rows:
+        top = " ".join(f"{emoji}×{n}" for emoji, n in row["top"])
+        lines.append(t("stats_line", kind=t("kind_" + row["kind"]) if t("kind_" + row["kind"]) != "kind_" + row["kind"]
+                       else row["kind"], sent=row["sent"], reactions=row["reactions"] or 0, replies=row["replies"] or 0,
+                       top=top or "—"))
+    lines.append(t("stats_note"))
+    return "\n".join(lines)
+
+
 async def preview_text(app, args: str) -> str | None:
     """
     /preview news | praise [name] | birthday [name] | <team command>
@@ -118,6 +184,9 @@ async def preview_text(app, args: str) -> str | None:
             if decision.accepted:
                 return f"{decision.text}\n\n{t('news_source', date=f'{article.published:%d.%m.%Y}', link=article.link)}"
         return ""
+    if what == "spontaneous":
+        facts = {"today": f"{weekday_name(now.weekday())} {now:%d.%m %H:%M}", "memory": who or None}
+        return await app.ai.post("spontaneous", facts, max_parts=1, maximum=200)
     if what in {"praise", "birthday"} and app.family and app.family.members:
         member = app.family.member(who) if who else (await app.family.choose())[0]
         if not member:

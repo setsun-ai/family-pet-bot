@@ -46,6 +46,17 @@ def setup_logging(settings: Settings, log_file: str | None = None) -> None:
     logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
+def make_noticer(settings: Settings, family, platform: str):
+    """Reactions and cheers for messages nobody addressed to the pet, or None when both are off."""
+    from .notice import Noticer
+    from .reactions import load_reactions
+    from .sentiment import Reader
+
+    rules = load_reactions(settings.reactions_file, platform)
+    reader = Reader(tuple(m.name for m in family.members)) if settings.sentiment_enabled else None
+    return Noticer(reader, rules) if rules or reader else None
+
+
 async def run(settings: Settings, check: bool = False) -> int:
     if settings.platform == "discord":
         from .discord_bot import run as run_discord
@@ -62,9 +73,11 @@ async def run(settings: Settings, check: bool = False) -> int:
     from .delivery import DeliveryService
     from .family import FamilyService, load_family
     from .handlers import App, check_text, make_router
+    from .mood import MoodService
     from .news import NewsService
     from .scheduler import Scheduler
     from .security import AccessControl
+    from .spontaneous import Spontaneous
     from .sports import SportsService, teams_from_settings
 
     db = Database(settings.database_path)
@@ -87,8 +100,11 @@ async def run(settings: Settings, check: bool = False) -> int:
             family = FamilyService(settings, db, ai, load_family(settings.family_file))
             access = AccessControl(db)
             scheduler = Scheduler(settings, db, news, sports, delivery, family)
+            mood = MoodService(settings, db) if settings.mood_enabled else None
+            ai.mood = mood
+            scheduler.spontaneous = Spontaneous(settings, db, ai, delivery, mood)
             app = App(settings, db, bot, me, ai, news, sports, delivery, access, scheduler, RateLimiter(), ChatLocks(),
-                      family=family)
+                      family=family, mood=mood, noticer=make_noticer(settings, family, "telegram"))
             if check:
                 print("Telegram: OK — @" + (me.username or str(me.id)))
                 print(await check_text(app))
@@ -103,7 +119,7 @@ async def run(settings: Settings, check: bool = False) -> int:
             scheduler.start()
             logging.info(t("console_started", username=me.username, tz=settings.timezone))
             try:
-                await dispatcher.start_polling(bot, allowed_updates=["message"], tasks_concurrency_limit=32,
+                await dispatcher.start_polling(bot, allowed_updates=["message", "message_reaction"], tasks_concurrency_limit=32,
                                                close_bot_session=False)
             finally:
                 await scheduler.stop()

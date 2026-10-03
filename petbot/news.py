@@ -1,6 +1,10 @@
 """
-Daily good news: fresh items from RSS feeds (NEWS_FEEDS), reviewed by the AI
+Good news: fresh items from RSS feeds (NEWS_FEEDS), reviewed by the AI
 in the pet's voice, posted to the family chat with the source link.
+
+NEWS_MODE=on_request: nothing is posted on a schedule. A couple of times a week
+(NEWS_REFRESH_DAYS) the pet restocks a few ready stories, and /news or "any
+news?" gets one of them at once - no feed download, no AI call while people wait.
 
 Nothing is invented: if every candidate is rejected or the feeds are down,
 nothing is posted. Each article is reviewed at most once (cached decision).
@@ -20,7 +24,7 @@ import feedparser
 import httpx
 from bs4 import BeautifulSoup
 
-from .ai import AIService
+from .ai import AIError, AIService
 from .common import ServiceError, fetch_bytes, safe_url
 from .config import Settings
 from .db import Database
@@ -109,8 +113,57 @@ class NewsService:
         self.last_error = None if all(result is not None for result in results) else t("rss_some_down")
         return self.cached
 
+    def _message(self, post: str, published: datetime, link: str) -> str:
+        date = published.astimezone(self.settings.tz)
+        return f"{tidy(post, self.settings.persona_emoji, 550)}\n\n" + t("news_source", date=f"{date:%d.%m.%Y}", link=link)
+
+    async def _review(self, article: Article) -> dict:
+        # "cat3:" = the review cache key used since the first version; keeps old decisions valid.
+        review_id = "cat3:" + article.id
+        review = await self.db.review(review_id)
+        if review is None:
+            decision = await self.ai.news(article.title, article.summary)
+            review = {"decision": "accept" if decision.accepted else "reject", "post": decision.text}
+            await self.db.save_review(review_id, review["decision"], review["post"])
+        return review
+
+    async def restock(self, chat_id: int, now: datetime | None = None) -> int:
+        """Review fresh articles until NEWS_STOCK_SIZE stories are ready for this chat. Returns the stock size."""
+        now = now or datetime.now(UTC)
+        async with self.lock:
+            ready = len(await self.db.stock(chat_id))
+            evaluated = 0
+            for article in await self.articles(now):
+                if ready >= self.settings.news_stock_size:
+                    break
+                if await self.db.in_stock(article.id) or await self.db.has_delivery(chat_id, "news", article.id):
+                    continue
+                if await self.db.review("cat3:" + article.id) is None:
+                    if evaluated >= self.settings.max_news_ai_calls_per_day:
+                        break
+                    evaluated += 1
+                try:
+                    review = await self._review(article)
+                except AIError as error:
+                    self.last_error = str(error)
+                    break  # keep what is ready; the next restock continues
+                if review["decision"] == "accept":
+                    await self.db.add_to_stock(article.id, review["post"], article.link, article.published)
+                    ready += 1
+            return ready
+
+    async def from_stock(self, chat_id: int) -> bool:
+        """Post a ready story right away, if there is one."""
+        async with self.lock:
+            for item in await self.db.stock(chat_id):
+                message = self._message(item["post"], datetime.fromisoformat(item["published"]), item["link"])
+                return await self.delivery.send(chat_id, message, [("news", item["article_id"])])
+            return False
+
     async def publish(self, chat_id: int, daily_key: str | None = None, *, now: datetime | None = None) -> bool:
         now = now or datetime.now(UTC)
+        if not daily_key and await self.from_stock(chat_id):
+            return True
         async with self.lock:
             if daily_key and await self.db.has_delivery(chat_id, "daily", daily_key):
                 return False
@@ -118,21 +171,14 @@ class NewsService:
             for article in await self.articles(now):
                 if await self.db.has_delivery(chat_id, "news", article.id):
                     continue
-                # "cat3:" = the review cache key used since the first version; keeps old decisions valid.
-                review_id = "cat3:" + article.id
-                review = await self.db.review(review_id)
-                if review is None:
+                if await self.db.review("cat3:" + article.id) is None:
                     if evaluated >= self.settings.news_max_candidates:
                         break
                     evaluated += 1
-                    decision = await self.ai.news(article.title, article.summary)
-                    review = {"decision": "accept" if decision.accepted else "reject", "post": decision.text}
-                    await self.db.save_review(review_id, review["decision"], review["post"])
+                review = await self._review(article)
                 if review["decision"] != "accept":
                     continue
-                date = article.published.astimezone(self.settings.tz)
-                message = (f"{tidy(review['post'], self.settings.persona_emoji, 550)}\n\n"
-                           + t("news_source", date=f"{date:%d.%m.%Y}", link=article.link))
+                message = self._message(review["post"], article.published, article.link)
                 keys = [("news", article.id)]
                 if daily_key:
                     keys.append(("daily", daily_key))

@@ -10,6 +10,8 @@ discord.py>=2.7
 feedparser>=6.0
 filelock>=3.29
 httpx>=0.28
+# Russian morphology for SENTIMENT_ENABLED (offline dictionaries, pure Python)
+pymorphy3>=2.0
 python-dotenv>=1.2
 # time zones for zoneinfo on Windows, which has no system database
 tzdata>=2026.2

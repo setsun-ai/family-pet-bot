@@ -59,7 +59,19 @@ class Database:
         CREATE TABLE IF NOT EXISTS scheduled_attempts(
             chat_id INTEGER NOT NULL, job_key TEXT NOT NULL, attempts INTEGER NOT NULL,
             last_attempt TEXT NOT NULL, PRIMARY KEY(chat_id, job_key));
-        PRAGMA user_version=4;
+        CREATE TABLE IF NOT EXISTS news_stock(
+            article_id TEXT PRIMARY KEY, post TEXT NOT NULL, link TEXT NOT NULL,
+            published TEXT NOT NULL, added_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS memories(
+            id INTEGER PRIMARY KEY, chat_id INTEGER NOT NULL, fact TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS memories_chat ON memories(chat_id, id);
+        CREATE TABLE IF NOT EXISTS sent_messages(
+            chat_id INTEGER NOT NULL, message_id INTEGER NOT NULL, kind TEXT NOT NULL, created_at TEXT NOT NULL,
+            PRIMARY KEY(chat_id, message_id));
+        CREATE TABLE IF NOT EXISTS feedback(
+            chat_id INTEGER NOT NULL, message_id INTEGER NOT NULL, user_id INTEGER NOT NULL, emoji TEXT NOT NULL,
+            created_at TEXT NOT NULL, PRIMARY KEY(chat_id, message_id, user_id, emoji));
+        PRAGMA user_version=6;
         """)
         # A database from the first version named the notice table after its cat character.
         async with self.connection.execute(
@@ -165,9 +177,93 @@ class Database:
                 (chat_id, "user", user_text, utcstamp()), (chat_id, "assistant", reply, utcstamp())])
             await db.execute("DELETE FROM dialogs WHERE chat_id=? AND id NOT IN (SELECT id FROM dialogs WHERE chat_id=? ORDER BY id DESC LIMIT ?)", (chat_id, chat_id, keep))
 
+    # --- long-term memory: short facts the pet chose to remember from conversations addressed to it ---
+    async def add_memory(self, chat_id: int, fact: str, keep: int = 40) -> None:
+        async with self.transaction() as db:
+            await db.execute("INSERT INTO memories(chat_id,fact,created_at) VALUES(?,?,?)", (chat_id, fact, utcstamp()))
+            await db.execute("DELETE FROM memories WHERE chat_id=? AND id NOT IN "
+                             "(SELECT id FROM memories WHERE chat_id=? ORDER BY id DESC LIMIT ?)", (chat_id, chat_id, keep))
+
+    async def memories(self, chat_id: int, days: int = 60) -> list[dict]:
+        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+        async with self.transaction() as db:
+            async with db.execute("SELECT id,fact,created_at FROM memories WHERE chat_id=? AND created_at>=? ORDER BY id",
+                                  (chat_id, cutoff)) as cur:
+                return [dict(row) for row in await cur.fetchall()]
+
+    async def delete_memory(self, chat_id: int, memory_id: int) -> bool:
+        async with self.transaction() as db:
+            cur = await db.execute("DELETE FROM memories WHERE chat_id=? AND id=?", (chat_id, memory_id))
+            return cur.rowcount > 0
+
+    # --- feedback: how the family reacts to what the pet posts ---
+    async def remember_sent(self, chat_id: int, message_ids: list[int], kind: str) -> None:
+        async with self.transaction() as db:
+            await db.executemany("INSERT OR IGNORE INTO sent_messages VALUES(?,?,?,?)",
+                                 [(chat_id, mid, kind, utcstamp()) for mid in message_ids])
+
+    async def sent_kind(self, chat_id: int, message_id: int) -> str | None:
+        async with self.transaction() as db:
+            async with db.execute("SELECT kind FROM sent_messages WHERE chat_id=? AND message_id=?", (chat_id, message_id)) as cur:
+                row = await cur.fetchone()
+                return row[0] if row else None
+
+    async def set_feedback(self, chat_id: int, message_id: int, user_id: int, emojis: list[str]) -> None:
+        """Telegram reports a person's whole reaction set on a message; replace it (replies, "↩", are kept)."""
+        async with self.transaction() as db:
+            await db.execute("DELETE FROM feedback WHERE chat_id=? AND message_id=? AND user_id=? AND emoji!='↩'",
+                             (chat_id, message_id, user_id))
+            await db.executemany("INSERT OR IGNORE INTO feedback VALUES(?,?,?,?,?)",
+                                 [(chat_id, message_id, user_id, e, utcstamp()) for e in emojis])
+
+    async def add_feedback(self, chat_id: int, message_id: int, user_id: int, emoji: str, added: bool = True) -> None:
+        async with self.transaction() as db:
+            if added:
+                await db.execute("INSERT OR IGNORE INTO feedback VALUES(?,?,?,?,?)",
+                                 (chat_id, message_id, user_id, emoji, utcstamp()))
+            else:
+                await db.execute("DELETE FROM feedback WHERE chat_id=? AND message_id=? AND user_id=? AND emoji=?",
+                                 (chat_id, message_id, user_id, emoji))
+
+    async def replies_since(self, chat_id: int, kind: str, since: datetime) -> int:
+        """Replies ("↩") to the pet's messages of this kind sent after `since`."""
+        async with self.transaction() as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM feedback f JOIN sent_messages s ON f.chat_id=s.chat_id AND f.message_id=s.message_id "
+                "WHERE s.chat_id=? AND s.kind=? AND s.created_at>=? AND f.emoji='↩'",
+                (chat_id, kind, since.astimezone(UTC).isoformat())) as cur:
+                return (await cur.fetchone())[0]
+
+    async def delivery_time(self, chat_id: int, kind: str, item_id: str) -> datetime | None:
+        async with self.transaction() as db:
+            async with db.execute("SELECT created_at FROM deliveries WHERE chat_id=? AND kind=? AND item_id=?",
+                                  (chat_id, kind, item_id)) as cur:
+                row = await cur.fetchone()
+                return datetime.fromisoformat(row[0]) if row else None
+
+    async def feedback_stats(self, chat_id: int, days: int = 30) -> list[dict]:
+        """Per kind of post: messages sent, reactions, replies and the most common emoji."""
+        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+        async with self.transaction() as db:
+            async with db.execute(
+                "SELECT s.kind, COUNT(DISTINCT s.message_id) AS sent, "
+                "SUM(CASE WHEN f.emoji IS NOT NULL AND f.emoji!='↩' THEN 1 ELSE 0 END) AS reactions, "
+                "SUM(CASE WHEN f.emoji='↩' THEN 1 ELSE 0 END) AS replies "
+                "FROM sent_messages s LEFT JOIN feedback f ON f.chat_id=s.chat_id AND f.message_id=s.message_id "
+                "WHERE s.chat_id=? AND s.created_at>=? GROUP BY s.kind ORDER BY sent DESC", (chat_id, cutoff)) as cur:
+                rows = [dict(row) for row in await cur.fetchall()]
+            for row in rows:
+                async with db.execute(
+                    "SELECT f.emoji, COUNT(*) FROM feedback f JOIN sent_messages s ON f.chat_id=s.chat_id "
+                    "AND f.message_id=s.message_id WHERE s.chat_id=? AND s.kind=? AND s.created_at>=? AND f.emoji!='↩' "
+                    "GROUP BY f.emoji ORDER BY COUNT(*) DESC LIMIT 3", (chat_id, row["kind"], cutoff)) as cur:
+                    row["top"] = [(e, n) for e, n in await cur.fetchall()]
+            return rows
+
     async def forget(self, chat_id: int) -> None:
         async with self.transaction() as db:
             await db.execute("DELETE FROM dialogs WHERE chat_id=?", (chat_id,))
+            await db.execute("DELETE FROM memories WHERE chat_id=?", (chat_id,))
             await db.execute("UPDATE deliveries SET text='' WHERE chat_id=? AND kind='dialog'", (chat_id,))
 
     async def consume_ai_call(self, day: str, limit: int, *, category: str | None = None,
@@ -235,6 +331,24 @@ class Database:
         async with self.transaction() as db:
             await db.execute("INSERT OR REPLACE INTO news_reviews VALUES(?,?,?,?)", (article_id, decision, post, utcstamp()))
 
+    async def add_to_stock(self, article_id: str, post: str, link: str, published: datetime) -> None:
+        async with self.transaction() as db:
+            await db.execute("INSERT OR IGNORE INTO news_stock VALUES(?,?,?,?,?)",
+                             (article_id, post, link, published.astimezone(UTC).isoformat(), utcstamp()))
+
+    async def stock(self, chat_id: int) -> list[dict]:
+        """Ready stories this chat hasn't seen yet, newest first."""
+        async with self.transaction() as db:
+            async with db.execute(
+                "SELECT * FROM news_stock s WHERE NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.chat_id=? "
+                "AND d.kind='news' AND d.item_id=s.article_id) ORDER BY published DESC", (chat_id,)) as cur:
+                return [dict(row) for row in await cur.fetchall()]
+
+    async def in_stock(self, article_id: str) -> bool:
+        async with self.transaction() as db:
+            async with db.execute("SELECT 1 FROM news_stock WHERE article_id=?", (article_id,)) as cur:
+                return await cur.fetchone() is not None
+
     async def has_delivery(self, chat_id: int, kind: str, item_id: str) -> bool:
         async with self.transaction() as db:
             async with db.execute("SELECT 1 FROM deliveries WHERE chat_id=? AND kind=? AND item_id=?", (chat_id, kind, item_id)) as cur:
@@ -279,14 +393,20 @@ class Database:
         async with self.transaction() as db:
             await db.execute("UPDATE settings SET value=? WHERE key='family_chat_id' AND value=?", (str(new), str(old)))
             await db.execute("UPDATE dialogs SET chat_id=? WHERE chat_id=?", (new, old))
+            for table in ("memories", "sent_messages", "feedback"):
+                await db.execute(f"UPDATE OR IGNORE {table} SET chat_id=? WHERE chat_id=?", (new, old))
             await db.execute("UPDATE OR IGNORE deliveries SET chat_id=? WHERE chat_id=?", (new, old))
 
-    async def cleanup(self, history_days: int) -> None:
+    async def cleanup(self, history_days: int, memory_days: int = 60) -> None:
         now = datetime.now(UTC)
         async with self.transaction() as db:
+            await db.execute("DELETE FROM memories WHERE created_at<?", ((now-timedelta(days=memory_days)).isoformat(),))
+            await db.execute("DELETE FROM sent_messages WHERE created_at<?", ((now-timedelta(days=90)).isoformat(),))
+            await db.execute("DELETE FROM feedback WHERE created_at<?", ((now-timedelta(days=90)).isoformat(),))
             await db.execute("DELETE FROM dialogs WHERE created_at<?", ((now-timedelta(days=history_days)).isoformat(),))
             await db.execute("UPDATE deliveries SET text='' WHERE kind='dialog' AND created_at<?", ((now-timedelta(days=history_days)).isoformat(),))
             await db.execute("DELETE FROM news_reviews WHERE reviewed_at<?", ((now-timedelta(days=45)).isoformat(),))
+            await db.execute("DELETE FROM news_stock WHERE published<?", ((now-timedelta(days=21)).isoformat(),))
             await db.execute("DELETE FROM deliveries WHERE state='sent' AND updated_at<?", ((now-timedelta(days=90)).isoformat(),))
             await db.execute("DELETE FROM scheduled_attempts WHERE last_attempt<?", ((now-timedelta(days=14)).isoformat(),))
             await db.execute("DELETE FROM ai_category_usage WHERE day<?", ((now-timedelta(days=90)).date().isoformat(),))

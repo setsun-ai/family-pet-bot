@@ -17,19 +17,21 @@ from datetime import UTC, datetime
 from aiogram import Bot, Router
 from aiogram.enums import ChatType
 from aiogram.exceptions import TelegramAPIError
-from aiogram.types import Message, User
+from aiogram.types import Message, MessageReactionUpdated, ReactionTypeEmoji, User
 
 from .ai import AIService
-from .common import ChatLocks, RateLimiter, ServiceError, addressed, limit_text, names_pattern
+from .common import ChatLocks, RateLimiter, ServiceError, addressed, asks_for_news, limit_text, names_pattern
 from .config import Settings
-from .core import check_text, help_text, preview_text, status_text  # noqa: F401
+from .core import check_text, help_text, memory_text, mood_text, preview_text, stats_text, status_text  # noqa: F401
 from .db import Database
 from .delivery import DeliveryService
 from .family import FamilyService
 from .housekeeping import Housekeeping
 from .i18n import t
 from .menus import publish_menus
+from .mood import MoodService
 from .news import NewsService
+from .notice import Noticer
 from .persona import filter_emoji, split_messages, valid_nickname
 from .scheduler import Scheduler
 from .security import AccessControl
@@ -37,7 +39,8 @@ from .sports import SportsService
 
 log = logging.getLogger(__name__)
 
-OWNER_PRIVATE_COMMANDS = {"status", "check", "allow", "deny", "users", "deliveries", "retry_delivery", "preview"}
+OWNER_PRIVATE_COMMANDS = {"status", "check", "allow", "deny", "users", "deliveries", "retry_delivery", "preview",
+                          "mood", "memory", "stats"}
 NICKNAME_COMMANDS = {"who", "name", "names", "unname"}
 
 
@@ -59,6 +62,8 @@ class App:
     last_check_ok: bool = False
     housekeeping: Housekeeping | None = None
     family: FamilyService | None = None
+    noticer: Noticer | None = None
+    mood: MoodService | None = None
 
     def __post_init__(self):
         self.names = names_pattern(self.settings.bot_names)
@@ -101,12 +106,16 @@ async def handle(message: Message, app: App) -> None:
             await app.db.migrate_chat(message.migrate_from_chat_id, message.chat.id)
         return
     user = message.from_user
-    if not user or user.is_bot or message.sender_chat or not message.text:
+    if not user or user.is_bot or message.sender_chat:
         return
     if message.chat.type not in {ChatType.PRIVATE, ChatType.GROUP, ChatType.SUPERGROUP}:
         return
     # Don't spend money on messages queued while the bot was offline.
     if (datetime.now(UTC) - message.date).total_seconds() > 300:
+        return
+    if not message.text:
+        if message.photo or message.animation or message.video or message.sticker:
+            await notice_media(message, app)
         return
     text = message.text.strip()
     command, args = split_command(text, app.me.username or "")
@@ -117,6 +126,8 @@ async def handle(message: Message, app: App) -> None:
     allowed = await app.access.allowed(user.id, message.chat.id, message.chat.type)
     if not app.limiter.allow(f"flood:{user.id}", 20):
         return
+    if allowed and not is_private:
+        app.scheduler.note_activity(message.chat.id, text=text)
 
     # --- available to anyone (needed before access is granted) ---
     if command == "start" and args.startswith("claim_"):
@@ -201,10 +212,19 @@ async def handle(message: Message, app: App) -> None:
     reply_author = message.reply_to_message.from_user if message.reply_to_message else None
     if not is_private and not addressed(text, app.me.username or "", reply_author.id if reply_author else None,
                                         app.me.id, app.names):
+        if app.noticer and not command:
+            await app.noticer.notice(app, message.chat.id, message.message_id, user.id, text,
+                                     lambda emoji: message.react([ReactionTypeEmoji(emoji=emoji)]))
         return
+    if reply_author and reply_author.id == app.me.id:  # a reply to the pet's message counts for /stats
+        await app.db.add_feedback(message.chat.id, message.reply_to_message.message_id, user.id, "↩")
     if len(text) > s.max_input_chars:
         await reply(message, t("too_long", n=s.max_input_chars), app)
         return
+    # "Any news?" - a ready story from the stock: instant, no AI call.
+    if s.news_enabled and asks_for_news(text) and app.limiter.allow(f"news:{message.chat.id}", 1, 60):
+        if await app.news.from_stock(message.chat.id):
+            return
     if not app.limiter.allow(f"ai:{user.id}", s.user_requests_per_minute):
         await reply(message, t("too_many"), app)
         return
@@ -223,10 +243,35 @@ async def handle(message: Message, app: App) -> None:
         if message.reply_to_message and reply_author and reply_author.id == app.me.id:
             context = message.reply_to_message.text or message.reply_to_message.caption
         answer = await app.ai.chat(history, text, display_name, reply_context=context,
-                                   verified_name=nickname is not None)
+                                   verified_name=nickname is not None, chat_id=message.chat.id)
         sent = await app.delivery.send(message.chat.id, answer, [("dialog", str(message.message_id))], message.message_id)
         if sent:
             await app.db.save_exchange(message.chat.id, f"{display_name[:100]}: {text}", answer, s.history_keep)
+
+
+async def notice_media(message: Message, app: App) -> None:
+    """A picture, GIF, video or sticker in the family group: maybe an emoji (REACTIONS_FILE rules with "media")."""
+    if app.noticer is None or message.chat.type == ChatType.PRIVATE:
+        return
+    user = message.from_user
+    if not await app.access.allowed(user.id, message.chat.id, message.chat.type) or \
+            not app.limiter.allow(f"flood:{user.id}", 20):
+        return
+    caption = (message.caption or "").strip()
+    app.scheduler.note_activity(message.chat.id, text=caption)
+    await app.noticer.notice(app, message.chat.id, message.message_id, user.id, caption,
+                             lambda emoji: message.react([ReactionTypeEmoji(emoji=emoji)]), media=True)
+
+
+async def reaction_update(update: MessageReactionUpdated, app: App) -> None:
+    """Someone reacted to a message: if it's the pet's, remember it for /stats (needs the bot to be a group admin)."""
+    user = update.user
+    if user is None or user.is_bot or update.chat.id != await app.db.family():
+        return
+    if await app.db.sent_kind(update.chat.id, update.message_id) is None:
+        return
+    emojis = [r.emoji for r in update.new_reaction if isinstance(r, ReactionTypeEmoji)]
+    await app.db.set_feedback(update.chat.id, update.message_id, user.id, emojis)
 
 
 async def nickname_command(message: Message, app: App, command: str, args: str, owner: bool, is_private: bool) -> None:
@@ -308,6 +353,12 @@ async def owner_command(message: Message, app: App, command: str, args: str, own
         await reply(message, t("deliveries_list", rows=body or t("status_none")), app)
     elif command == "preview":
         await preview_command(message, app, args)
+    elif command == "mood":
+        await reply(message, await mood_text(app, args), app)
+    elif command == "memory":
+        await reply(message, await memory_text(app, args), app, transient=False)
+    elif command == "stats":
+        await reply(message, await stats_text(app), app, transient=False)
     else:
         parts = args.split()
         if len(parts) != 2 or not parts[0].isdigit() or parts[1] != "confirm":
@@ -358,5 +409,12 @@ def make_router(app: App) -> Router:
         finally:
             if task is not None:
                 app.active_tasks.discard(task)
+
+    @router.message_reaction()
+    async def reactions(update: MessageReactionUpdated):
+        try:
+            await reaction_update(update, app)
+        except Exception as error:
+            log.warning("Reaction update failed (%s)", type(error).__name__)
 
     return router

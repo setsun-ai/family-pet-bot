@@ -124,7 +124,7 @@ class DiscordTests(unittest.IsolatedAsyncioTestCase):
         return SimpleNamespace(
             id=next(ids), content=text, clean_content=text, created_at=datetime.now(UTC), webhook_id=None,
             author=SimpleNamespace(id=uid, bot=False, display_name=f"User{uid}"), channel=channel,
-            guild=object() if guild else None, mentions=list(mentions), reference=reference)
+            guild=object() if guild else None, mentions=list(mentions), reference=reference, attachments=[], stickers=[])
 
     # --- delivery ---
     async def test_burst_one_sound_and_no_pings(self):

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import re
 import time
 from dataclasses import dataclass
@@ -30,6 +31,25 @@ NEWS_SCHEMA = {
     "required": ["decision", "text"],
     "additionalProperties": False,
 }
+# MEMORY_ENABLED: the reply and, in the same answer, an optional fact to remember - no extra AI call.
+CHAT_SCHEMA = {
+    "type": "object",
+    "properties": {"reply": {"type": "string"}, "remember": {"type": "string"}},
+    "required": ["reply", "remember"],
+    "additionalProperties": False,
+}
+
+
+# How long THIS reply should be, drawn per message: a real chat member sometimes answers with
+# two words and sometimes with a sentence. A fixed "be brief" rule makes every reply the same size.
+LENGTH_HINTS = {"length_tiny": 45, "length_short": 40, "length_two": 15}
+# The pet writes one-liners: models that think by default would spend 5-10x the tokens and seconds on them
+# (measured on Sonnet 5.5: ~400 thinking tokens for a 30-token line). Turn thinking off where the model allows it.
+NO_THINKING = {
+    "claude-sonnet-5-5": {"type": "between_tools"},  # Sonnet 5.5 rejects "disabled"
+    "claude-sonnet-5": {"type": "disabled"},
+    "claude-opus-5": {"type": "disabled"},
+}
 
 
 class AIError(ServiceError):
@@ -50,6 +70,8 @@ class AIService:
         self.last_error: str | None = None
         self.last_success: str | None = None
         self.cooldown_until = 0.0
+        self.rng = random.Random()
+        self.mood = None  # MoodService, set by the app when MOOD_ENABLED
 
     def _now(self) -> str:
         """Local date and time, so the pet knows it's Sunday morning or 2 a.m."""
@@ -60,8 +82,14 @@ class AIService:
         allowed = self.settings.persona_emoji
         return prompt("emoji_rule", emoji=" ".join(allowed)) if allowed else ""
 
+    async def _mood_line(self) -> str:
+        if self.mood is None:
+            return ""
+        return prompt("mood_intro") + " " + (await self.mood.current()).line
+
     async def complete(self, system: str, messages: list[dict], *, json_output: bool = False, max_tokens: int = 700,
-                       purpose: str = "chat", allow_partial: bool = False, model: str | None = None) -> str:
+                       purpose: str = "chat", allow_partial: bool = False, model: str | None = None,
+                       schema: dict | None = None) -> str:
         s = self.settings
         model = model or s.model
         async with self.semaphore:
@@ -80,9 +108,11 @@ class AIService:
                     url = "https://api.anthropic.com/v1/messages"
                     headers = {"x-api-key": s.api_key, "anthropic-version": "2023-06-01"}
                     body = {"model": model, "max_tokens": max_tokens, "system": system, "messages": messages}
+                    if model in NO_THINKING:
+                        body["thinking"] = NO_THINKING[model]
                     if json_output:
                         # Structured outputs: valid JSON by construction, not by asking nicely.
-                        body["output_config"] = {"format": {"type": "json_schema", "schema": NEWS_SCHEMA}}
+                        body["output_config"] = {"format": {"type": "json_schema", "schema": schema or NEWS_SCHEMA}}
                 else:
                     url = "https://api.openai.com/v1/chat/completions"
                     headers = {"Authorization": "Bearer " + s.api_key}
@@ -90,7 +120,7 @@ class AIService:
                             "messages": [{"role": "system", "content": system}, *messages], "store": False}
                     if json_output:
                         body["response_format"] = {"type": "json_schema", "json_schema": {
-                            "name": "news_decision", "strict": True, "schema": NEWS_SCHEMA}}
+                            "name": "answer", "strict": True, "schema": schema or NEWS_SCHEMA}}
                 try:
                     async with asyncio.timeout(s.ai_timeout + 5):
                         response = await self.client.post(url, headers=headers, json=body,
@@ -148,7 +178,7 @@ class AIService:
         log.warning("%s", self.last_error)  # only our own sanitized text
 
     async def chat(self, history: list[dict], text: str, name: str, *,
-                   reply_context: str | None = None, verified_name: bool = False) -> str:
+                   reply_context: str | None = None, verified_name: bool = False, chat_id: int | None = None) -> str:
         messages: list[dict] = []
         for row in history[-self.settings.history_messages:]:
             role = row.get("role")
@@ -168,12 +198,39 @@ class AIService:
             messages.append({"role": "user", "content": current})
         details = wants_detail(text)
         identity = json.dumps({"author_name": name[:100], "nickname_set_by_owner": verified_name}, ensure_ascii=False)
-        system = "\n\n".join(part for part in (self.persona, self._emoji_rule(), prompt("chat_rules"), self._now(),
+        length = "" if details else prompt(self.rng.choices(list(LENGTH_HINTS), list(LENGTH_HINTS.values()))[0])
+        remember = self.settings.memory_enabled and chat_id is not None
+        memory = ""
+        if remember:
+            facts = [f"{datetime.fromisoformat(m['created_at']).astimezone(self.settings.tz):%d.%m}: {m['fact']}"
+                     for m in await self.db.memories(chat_id, self.settings.memory_days)]
+            memory = prompt("memory_rules") + ("\n" + prompt("memory_info") + " " + json.dumps(facts, ensure_ascii=False)
+                                               if facts else "")
+        system = "\n\n".join(part for part in (self.persona, self._emoji_rule(), prompt("chat_rules"), length,
+                                                await self._mood_line(), memory, self._now(),
                                                 prompt("author_info") + " " + identity) if part)
         if reply_context:
             system += "\n" + prompt("reply_context") + " " + json.dumps(reply_context[:1800], ensure_ascii=False)
-        content = await self.complete(system, messages, max_tokens=1200 if details else 450, allow_partial=True)
-        return limit_text(tidy_messages(content, self.settings.persona_emoji, 2300 if details else 650))
+        content = await self.complete(system, messages, max_tokens=1200 if details else 450 if remember else 300, allow_partial=not remember,
+                                      json_output=remember, schema=CHAT_SCHEMA if remember else None)
+        if remember:
+            content = await self._remember(chat_id, content)
+        if details:
+            return limit_text(tidy_messages(content, self.settings.persona_emoji, 2300))
+        return limit_text(tidy_messages(content, self.settings.persona_emoji, self.settings.reply_max_chars, max_parts=2))
+
+    async def _remember(self, chat_id: int, raw: str) -> str:
+        """Split a structured chat answer into the reply and an optional fact to keep."""
+        try:
+            value = json.loads(raw)
+            reply, fact = str(value["reply"]), " ".join(str(value.get("remember") or "").split())
+        except (ValueError, TypeError, KeyError):
+            return raw  # not JSON after all: the whole answer is the reply
+        if 3 <= len(fact) <= 300:
+            await self.db.add_memory(chat_id, fact)
+        if not reply.strip():
+            raise AIError("ai_empty")
+        return reply
 
     async def news(self, title: str, summary: str) -> NewsDecision:
         system = "\n\n".join(part for part in (self.persona, self._emoji_rule(), prompt("news_task")) if part)
@@ -189,7 +246,7 @@ class AIService:
             if decision not in {"accept", "reject"} or not isinstance(text, str):
                 raise ValueError
             if decision == "accept":
-                text = tidy_messages(text, self.settings.persona_emoji, 550, max_parts=2)
+                text = tidy_messages(text, self.settings.persona_emoji, 400, max_parts=2)
                 if not text:
                     raise ValueError
                 return NewsDecision(True, text)
@@ -203,7 +260,8 @@ class AIService:
         as a few short chat messages. `facts` are data from the app - the prompt
         forbids changing or adding facts.
         """
-        system = "\n\n".join(part for part in (self.persona, self._emoji_rule(), prompt("post_rules"), self._now(),
+        mood = "" if task == "birthday" else await self._mood_line()  # a birthday is warm whatever the mood
+        system = "\n\n".join(part for part in (self.persona, self._emoji_rule(), prompt("post_rules"), mood, self._now(),
                                                 prompt(task)) if part)
         raw = await self.complete(system, [{"role": "user", "content": json.dumps(facts, ensure_ascii=False)}],
                                   max_tokens=600, allow_partial=True, purpose=task, model=self.settings.post_model or None)
