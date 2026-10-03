@@ -62,6 +62,7 @@ Headless tip: open the link on your phone, or send `/claim CODE` to the bot in T
 | Stop / start | `sudo systemctl stop family-pet-bot` / `start` |
 | Backup now | `.venv/bin/python -m petbot backup` |
 | Update the bot | `git pull && bash deploy/linux/install-service.sh` |
+| Update from Telegram (copy unpacked from a release archive, not a git clone) | `/update` in a private chat with the bot (owner only); `/rollback` goes back |
 | Remove the service | `bash deploy/linux/install-service.sh --remove` |
 
 ## Moving to another machine

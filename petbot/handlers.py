@@ -19,6 +19,7 @@ from aiogram.enums import ChatType
 from aiogram.exceptions import TelegramAPIError
 from aiogram.types import Message, MessageReactionUpdated, ReactionTypeEmoji, User
 
+from . import __version__, updater
 from .ai import AIService
 from .common import ChatLocks, RateLimiter, ServiceError, addressed, asks_for_news, limit_text, names_pattern
 from .config import Settings
@@ -40,7 +41,8 @@ from .sports import SportsService
 log = logging.getLogger(__name__)
 
 OWNER_PRIVATE_COMMANDS = {"status", "check", "allow", "deny", "users", "deliveries", "retry_delivery", "preview",
-                          "mood", "memory", "stats"}
+                          "mood", "memory", "stats", "update", "rollback"}
+STARTED = datetime.now(UTC).replace(microsecond=0)
 NICKNAME_COMMANDS = {"who", "name", "names", "unname"}
 
 
@@ -64,6 +66,9 @@ class App:
     family: FamilyService | None = None
     noticer: Noticer | None = None
     mood: MoodService | None = None
+    dispatcher: object | None = None  # aiogram Dispatcher, so /update can stop polling and restart
+    updating: bool = False
+    stop_task: asyncio.Task | None = None
 
     def __post_init__(self):
         self.names = names_pattern(self.settings.bot_names)
@@ -359,6 +364,11 @@ async def owner_command(message: Message, app: App, command: str, args: str, own
         await reply(message, await memory_text(app, args), app, transient=False)
     elif command == "stats":
         await reply(message, await stats_text(app), app, transient=False)
+    elif command in {"update", "rollback"}:
+        # After a restart Telegram delivers the same /update again: commands older than this process are skipped.
+        if message.date < STARTED:
+            return
+        await (update_command if command == "update" else rollback_command)(message, app)
     else:
         parts = args.split()
         if len(parts) != 2 or not parts[0].isdigit() or parts[1] != "confirm":
@@ -381,6 +391,54 @@ async def preview_command(message: Message, app: App, args: str) -> None:
     await reply(message, t("preview_header"), app)
     for part in split_messages(text):
         await reply(message, part, app, transient=False)
+
+
+async def update_command(message: Message, app: App) -> None:
+    """/update: install the newest GitHub release (details: updater.py), then restart."""
+    if app.updating:
+        await reply(message, t("update_busy"), app)
+        return
+    app.updating = True
+    try:
+        await reply(message, t("update_checking"), app)
+        try:
+            tag = await asyncio.to_thread(updater.latest_release)
+            if not updater.newer(tag):
+                await reply(message, t("update_latest", version=__version__), app, transient=False)
+                return
+            await reply(message, t("update_installing", tag=tag, version=__version__), app)
+            notes = await asyncio.to_thread(updater.install, tag)
+        except updater.UpdateError as error:
+            await reply(message, t("update_failed", version=__version__, error=str(error)), app, transient=False)
+            return
+        except Exception as error:
+            await reply(message, t("update_failed", version=__version__, error=type(error).__name__), app,
+                        transient=False)
+            return
+        await reply(message, t("update_restart", tag=tag, notes=notes), app, transient=False)
+        restart_bot(app)
+    finally:
+        app.updating = False
+
+
+async def rollback_command(message: Message, app: App) -> None:
+    """/rollback: back to the version that was active before the last /update (again = undo)."""
+    if app.updating:
+        await reply(message, t("update_busy"), app)
+        return
+    version = await asyncio.to_thread(updater.rollback)
+    if version is None:
+        await reply(message, t("rollback_none"), app, transient=False)
+        return
+    await reply(message, t("rollback_restart", version=version), app, transient=False)
+    restart_bot(app)
+
+
+def restart_bot(app: App) -> None:
+    """Stop polling gracefully; __main__ then starts the new code (updater.restart)."""
+    updater.request_restart()
+    if app.dispatcher is not None:
+        app.stop_task = asyncio.create_task(app.dispatcher.stop_polling())
 
 
 def make_router(app: App) -> Router:

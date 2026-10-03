@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.1 (2026-10)
+
+- **`/update` from Telegram** (owner, private chat): downloads the newest GitHub release, runs `pip install -r requirements.txt` only if it changed, starts the new code once (imports + `check-config`) and only then swaps `petbot/` and restarts itself. `.env`, personas, `*.local.json` and `data/` are never touched. If anything fails, the old version keeps running and the error is shown.
+- **`/rollback`**: back to the version that ran before the last `/update` (kept in `.update/previous`); a second `/rollback` goes forward again.
+- For copies unpacked from a release archive; in a git clone keep using `git pull`.
+
 ## 1.2.0 (2026-10)
 
 The pet talks less, notices more and has an inner life.

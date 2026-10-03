@@ -17,7 +17,7 @@ from .i18n import t
 log = logging.getLogger(__name__)
 
 OWNER_PRIVATE = ("status", "check", "preview", "mood", "memory", "stats", "names", "users", "allow", "deny", "deliveries",
-                 "retry_delivery")
+                 "retry_delivery", "update", "rollback")
 OWNER_GROUP = ("who", "name", "unname", "names", "setup_chat")
 
 

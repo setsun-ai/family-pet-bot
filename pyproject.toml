@@ -1,6 +1,6 @@
 [project]
 name = "family-pet-bot"
-version = "1.2.0"
+version = "1.2.1"
 description = "An AI pet character for your family Telegram or Discord chat: conversation, good news, your teams' matches, weekly praise and birthdays. English and Russian."
 readme = "README.md"
 license = { text = "MIT" }

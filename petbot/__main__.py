@@ -14,7 +14,7 @@ import asyncio
 import os
 import sys
 
-from . import __version__
+from . import __version__, updater
 from .config import ConfigError, Settings
 from .i18n import set_language, t
 
@@ -60,12 +60,15 @@ def main(argv: list[str] | None = None) -> int:
     settings.database_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     try:
         with FileLock(str(settings.database_path.parent / "bot.lock"), timeout=0):
-            return asyncio.run(run(settings, check=args.command == "check"))
+            code = asyncio.run(run(settings, check=args.command == "check"))
     except Timeout:
         print(t("console_already_running"), file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         return 0
+    if updater.restart_requested():  # after /update or /rollback, with the lock already released
+        updater.restart()
+    return code
 
 
 if __name__ == "__main__":

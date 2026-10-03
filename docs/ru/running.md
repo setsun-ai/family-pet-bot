@@ -62,6 +62,7 @@ journalctl -u family-pet-bot -n 30 --no-pager
 | Остановить / запустить | `sudo systemctl stop family-pet-bot` / `start` |
 | Резервная копия сейчас | `.venv/bin/python -m petbot backup` |
 | Обновить бота | `git pull && bash deploy/linux/install-service.sh` |
+| Обновить из Telegram (копия распакована из архива релиза, не git clone) | `/update` в личке бота (только владелец); `/rollback` — откат |
 | Удалить службу | `bash deploy/linux/install-service.sh --remove` |
 
 ## Перенос на другой компьютер

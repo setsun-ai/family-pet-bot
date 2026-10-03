@@ -114,6 +114,7 @@ async def run(settings: Settings, check: bool = False) -> int:
             await app.housekeeping.start()
             dispatcher = Dispatcher()
             dispatcher.include_router(make_router(app))
+            app.dispatcher = dispatcher
             await bot.delete_webhook(drop_pending_updates=False)
             await publish_menus(bot, db, settings, sports.teams)
             scheduler.start()

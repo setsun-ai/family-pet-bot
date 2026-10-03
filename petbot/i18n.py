@@ -123,12 +123,14 @@ MESSAGES: dict[str, dict[str, str]] = {
                          "/status, /check — status and connection test (private)\n/allow ID, /deny ID — private access\n"
                          "/users — allowed people\n/who, /name Name, /unname — reply to a person: ID / set / remove nickname\n"
                          "/names — all nicknames\n/del — reply to my message: delete it\n"
-                         "/deliveries, /retry_delivery ID confirm — sends with an unknown outcome",
+                         "/deliveries, /retry_delivery ID confirm — sends with an unknown outcome\n"
+                         "/update, /rollback — install the newest release / go back (private)",
                    "ru": "\nВладельцу:\n/setup_chat — назначить семейную группу (отправить в группе)\n"
                          "/status, /check — состояние и проверка подключений (в личке)\n/allow ID, /deny ID — доступ к личке\n"
                          "/users — разрешённые люди\n/who, /name Имя, /unname — Reply на человека: ID / задать / убрать имя\n"
                          "/names — все домашние имена\n/del — Reply на моё сообщение: удалить\n"
-                         "/deliveries, /retry_delivery ID confirm — отправки с неизвестным исходом"},
+                         "/deliveries, /retry_delivery ID confirm — отправки с неизвестным исходом\n"
+                         "/update, /rollback — поставить новую версию / вернуть прежнюю (в личке)"},
     "privacy": {"en": "🔐 Only messages addressed to me go to the AI: the author's name, the text and up to 8 recent lines "
                       "of this chat. Chats are isolated. Other group conversation is not stored and not sent anywhere.\n\n"
                       "The local SQLite database is not encrypted. Memory: up to 50 lines per chat, not older than {days} days. "
@@ -228,6 +230,19 @@ MESSAGES: dict[str, dict[str, str]] = {
     "cmd_mood": {"en": "The pet's mood (or set one)", "ru": "Настроение питомца (или задать)"},
     "cmd_memory": {"en": "What the pet remembers", "ru": "Что питомец помнит"},
     "cmd_stats": {"en": "Which posts the family reacts to", "ru": "На какие сообщения реагирует семья"},
+    "cmd_update": {"en": "Install the newest version from GitHub", "ru": "Поставить новую версию с GitHub"},
+    "cmd_rollback": {"en": "Go back to the previous version", "ru": "Вернуть прежнюю версию"},
+    "update_checking": {"en": "🔎 Checking GitHub for a new version…", "ru": "🔎 Ищу новую версию на GitHub…"},
+    "update_latest": {"en": "✅ {version} is the newest version.", "ru": "✅ {version} — это последняя версия."},
+    "update_installing": {"en": "⬇️ Installing {tag} (now {version}). Dependencies may take a few minutes…",
+                          "ru": "⬇️ Ставлю {tag} (сейчас {version}). Зависимости могут ставиться несколько минут…"},
+    "update_failed": {"en": "❌ Update failed, still running {version}.\n{error}",
+                      "ru": "❌ Обновление не удалось, работает {version}.\n{error}"},
+    "update_restart": {"en": "🔄 {tag} installed, restarting…\n{notes}\nIf something is wrong: /rollback",
+                       "ru": "🔄 {tag} установлена, перезапускаюсь…\n{notes}\nЕсли что-то не так: /rollback"},
+    "update_busy": {"en": "⏳ An update is already running.", "ru": "⏳ Обновление уже идёт."},
+    "rollback_none": {"en": "There is no previous version to go back to.", "ru": "Прежней версии для отката нет."},
+    "rollback_restart": {"en": "↩️ Back to {version}, restarting…", "ru": "↩️ Возвращаю {version}, перезапускаюсь…"},
     "opt_mood": {"en": "a mood name, empty = just show", "ru": "название настроения, пусто — только показать"},
     "opt_memory_delete": {"en": "number of a fact to forget", "ru": "номер факта, который забыть"},
     "status_praise": {"en": "Weekly praise: next {day} {time}, person: {name}",
