@@ -7,6 +7,8 @@
 
 🇷🇺 **[Русская версия →](README.ru.md)**
 
+*Personal automation project.*
+
 **Your family's pet, living in your family chat on Telegram or Discord.** An AI character you describe in a text file: your cat, dog, parrot or anyone else. It chats with the family in its own voice, like a person in a messenger: a few short messages, not a wall of text. It brings a kind news story, cheers for your teams, praises one of you every week and never forgets a birthday. English and Russian.
 
 ```
@@ -66,6 +68,26 @@ Step by step: **[Getting started](docs/en/getting-started.md)** · **[Discord](d
 | [Troubleshooting & FAQ](docs/en/troubleshooting.md) | When it's silent, costs, privacy questions |
 | [How it works](docs/en/how-it-works.md) | Architecture and design decisions, for developers |
 | [Privacy](PRIVACY.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md) | |
+
+## Your data: what stays local and what leaves the device
+
+> **Self-hosted does not mean all data stays local when an external model provider is enabled.**
+
+| Data | Stored locally (SQLite, `0600`, not encrypted) | Sent to the AI provider (Anthropic or OpenAI) | Retention |
+|---|---|---|---|
+| Messages addressed to the pet | up to 50 lines per chat | the message, the author's name and up to 8 recent lines of that chat | local: `HISTORY_DAYS` (30); provider: per its terms (OpenAI requests use `store: false`) |
+| Facts the pet remembers | up to 40 short facts per chat | as context in later answers | `MEMORY_DAYS` (60); `/forget` clears them at once |
+| Persona file, family file (hobbies, birthdays) | your own `*.local.*` files | the persona with every request; a person's name and `about` text for praise and birthdays | until you edit the files |
+| Other group messages | never stored | never sent | – |
+| Telegram/Discord user IDs, nicknames | access control, `/name` | no | until `/unname` or `/deny` |
+
+- **Logs:** never contain message content, prompts or secrets. Error lines name only the exception type, and tokens and API keys are redacted, even inside library tracebacks (`tests/test_log_privacy.py`).
+- **The database file:** created with permissions `0600` (and `umask 077`). On a shared machine, check it with `ls -l data/`, and `chmod 600 data/*.sqlite3` if you copied it from elsewhere.
+- **Full details and deletion steps:** [PRIVACY.md](PRIVACY.md).
+
+## AI usage
+
+AI-assisted development was used for implementation and documentation. The design decisions (what is stored, what is sent, spending limits, access control), result verification and testing were reviewed and owned by me.
 
 ## Good to know
 
