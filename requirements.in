@@ -8,11 +8,11 @@ aiosqlite>=0.22
 beautifulsoup4>=4.14
 discord.py>=2.7
 feedparser>=6.0
-filelock>=3.29
+filelock>=4.0.9
 httpx>=0.28
 # Russian morphology for SENTIMENT_ENABLED (offline dictionaries, pure Python)
 pymorphy3>=2.0
-python-dotenv>=1.2
+python-dotenv>=1.2.4
 # time zones for zoneinfo on Windows, which has no system database
 tzdata>=2026.2
 # discord.py needs it on 3.13+ (audioop left the standard library); listed here so the
