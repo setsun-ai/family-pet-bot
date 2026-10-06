@@ -9,7 +9,8 @@
 | Data | When | Stored locally? |
 |---|---|---|
 | Messages **addressed to the bot** (reply, @mention, its name, private chat) | always | yes: up to 50 lines per chat, deleted after `HISTORY_DAYS` (30) |
-| Other group messages | only with `REACTIONS_FILE` or `SENTIMENT_ENABLED`: read locally (keyword rules, a dictionary) to maybe add an emoji reaction or a short cheer; of pictures only the fact that one was sent and the caption | **no**: never stored, never sent to the AI |
+| Other group messages | only with `REACTIONS_FILE` or `SENTIMENT_ENABLED`: read locally (keyword rules, a dictionary) to maybe add an emoji reaction or a short cheer; of pictures only the fact that one was sent and the caption | **no**: never stored, never sent to the AI (unless `CHAT_CONTEXT` is on, see the next line) |
+| Recent group messages, with `CHAT_CONTEXT=N` (off by default) | the last N family-group messages (at most 3 hours old): author's nickname or first name, text, "[photo]"-style labels | **kept in memory only**, never written to disk, gone after a restart or `/forget`; **sent to the AI** when the pet answers, glances at the chat or speaks up on its own |
 | Facts the pet remembers (`MEMORY_ENABLED`) | taken from messages addressed to it | yes: up to 40 short facts per chat, deleted after `MEMORY_DAYS` (60); `/memory`, `/forget` |
 | Reactions and replies to the pet's own messages | for `/stats` | yes: message id, user id, emoji; deleted after 90 days |
 | Telegram / Discord user IDs | for access control | yes: owner, allowed users, nicknames |
@@ -22,7 +23,7 @@
 | Destination | What exactly |
 |---|---|
 | **Telegram or Discord** | The bot's messages; the app also delivers the messages to the bot. Discord (MESSAGE CONTENT intent) delivers every message of the channels the bot can see; the bot ignores those not addressed to it. |
-| **Your AI provider** (Anthropic or OpenAI) | For an addressed message: the persona text, the author's name, the message, up to 8 recent lines of *that* chat, and the quoted bot message if it's a reply. For news: the article's title and summary. For match posts: teams, score, scorers, table. For weekly praise and birthdays: the person's name and their `about` text from the family file. OpenAI requests are sent with `store: false`. Both providers process data under their own terms. |
+| **Your AI provider** (Anthropic or OpenAI) | For an addressed message: the persona text, the author's name, the message, up to 8 recent lines of *that* chat, and the quoted bot message if it's a reply; with `CHAT_CONTEXT`, also the last N family-group messages (for answers, glances at the chat and messages the pet starts itself). For news: the article's title and summary. For match posts: teams, score, scorers, table. For weekly praise and birthdays: the person's name and their `about` text from the family file. OpenAI requests are sent with `store: false`. Both providers process data under their own terms. |
 | **RSS feeds, TheSportsDB, ESPN, upl.ua** | Ordinary public HTTPS requests. No personal data. |
 
 Nothing else is sent anywhere: no crash reports, statistics or update checks.
@@ -55,7 +56,8 @@ Nothing else is sent anywhere: no crash reports, statistics or update checks.
 | Данные | Когда | Хранится локально? |
 |---|---|---|
 | Сообщения, **адресованные боту** (Reply, @упоминание, его имя, личка) | всегда | да: до 50 реплик на чат, удаляются через `HISTORY_DAYS` (30) |
-| Остальные сообщения группы | только с `REACTIONS_FILE` или `SENTIMENT_ENABLED`: читаются локально (правила, словарь), чтобы, может быть, поставить реакцию или коротко похвалить | **нет**: не сохраняются и не отправляются ИИ |
+| Остальные сообщения группы | только с `REACTIONS_FILE` или `SENTIMENT_ENABLED`: читаются локально (правила, словарь), чтобы, может быть, поставить реакцию или коротко похвалить | **нет**: не сохраняются и не отправляются ИИ (если не включён `CHAT_CONTEXT`, см. следующую строку) |
+| Недавние сообщения группы, с `CHAT_CONTEXT=N` (по умолчанию выключено) | последние N сообщений семейной группы (не старше 3 часов): домашнее имя или имя автора, текст, пометки вроде «[photo]» | **только в памяти**, на диск не пишутся, исчезают после перезапуска или `/forget`; **отправляются ИИ**, когда питомец отвечает, поглядывает в чат или сам заговаривает |
 | Факты, которые питомец запомнил (`MEMORY_ENABLED`) | из сообщений, обращённых к нему | да: до 40 коротких фактов на чат, удаляются через `MEMORY_DAYS` (60); `/memory`, `/forget` |
 | Реакции и ответы на сообщения самого питомца | для `/stats` | да: ID сообщения, ID пользователя, эмодзи; удаляются через 90 дней |
 | Telegram / Discord ID пользователей | для контроля доступа | да: владелец, разрешённые, домашние имена |
@@ -68,7 +70,7 @@ Nothing else is sent anywhere: no crash reports, statistics or update checks.
 | Куда | Что именно |
 |---|---|
 | **Telegram или Discord** | Сообщения бота; мессенджер также доставляет сообщения боту. Discord (MESSAGE CONTENT intent) доставляет все сообщения видимых боту каналов; бот игнорирует те, что не адресованы ему. |
-| **Ваш ИИ-провайдер** (Anthropic или OpenAI) | Для обращения: текст персонажа, имя автора, сообщение, до 8 последних реплик *этого* чата и цитируемое сообщение бота, если это Reply. Для новостей: заголовок и краткое содержание статьи. Для постов о матчах: команды, счёт, авторы голов, таблица. Для похвалы недели и дней рождения: имя человека и его текст `about` из файла семьи. Запросы к OpenAI отправляются с `store: false`. Оба провайдера обрабатывают данные по своим условиям. |
+| **Ваш ИИ-провайдер** (Anthropic или OpenAI) | Для обращения: текст персонажа, имя автора, сообщение, до 8 последних реплик *этого* чата и цитируемое сообщение бота, если это Reply; с `CHAT_CONTEXT` — ещё последние N сообщений семейной группы (для ответов, взгляда в чат и сообщений, которые питомец начинает сам). Для новостей: заголовок и краткое содержание статьи. Для постов о матчах: команды, счёт, авторы голов, таблица. Для похвалы недели и дней рождения: имя человека и его текст `about` из файла семьи. Запросы к OpenAI отправляются с `store: false`. Оба провайдера обрабатывают данные по своим условиям. |
 | **RSS-ленты, TheSportsDB, ESPN, upl.ua** | Обычные публичные HTTPS-запросы. Без личных данных. |
 
 Больше ничего никуда не отправляется: ни отчётов об ошибках, ни статистики, ни проверок обновлений.

@@ -40,6 +40,7 @@ class Delivery:
     def __init__(self, db: Database, allowed_emoji: str = "", *, pauses: bool = True):
         self.db, self.allowed_emoji, self.pauses = db, allowed_emoji, pauses
         self.last_error: str | None = None
+        self.context = None  # ChatContext (CHAT_CONTEXT): what the pet said becomes part of the conversation
 
     # --- platform hooks ---
     async def _post(self, chat_id: int, text: str, reply_to: int | None, silent: bool) -> int | None:
@@ -107,6 +108,8 @@ class Delivery:
         # Never retry if the success acknowledgement cannot be saved locally.
         await self.db.finish_delivery(group, "sent", message_id=last_id)
         self.last_error = None
+        if self.context:
+            self.context.add(chat_id, last_id, self.context.pet_name, " / ".join(parts), pet=True)
         if kind and ids:
             try:  # only for /stats - never a reason to treat a sent message as failed
                 await self.db.remember_sent(chat_id, ids, kind)

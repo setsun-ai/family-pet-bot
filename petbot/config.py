@@ -89,6 +89,7 @@ class Settings:
     memory_days: int = 60
     spontaneous_per_week: float = 0  # speak up on its own, on average this many times a week
     chime_in_per_day: int = 0  # join a lively family conversation (by its local "vibe"), at most this often a day
+    chat_context: int = 0  # the AI sees the last N family messages (kept in memory only); 0 = it sees none
     # quiet hours, limits, memory
     quiet_start_hour: int = 23
     quiet_end_hour: int = 8
@@ -256,6 +257,7 @@ class Settings:
             memory_enabled=flag("MEMORY_ENABLED", False), memory_days=number("MEMORY_DAYS", 60, 1, 365),
             spontaneous_per_week=number("SPONTANEOUS_PER_WEEK", 0, 0, 7),
             chime_in_per_day=number("CHIME_IN_PER_DAY", 0, 0, 10),
+            chat_context=number("CHAT_CONTEXT", 0, 0, 60),
             quiet_start_hour=number("QUIET_START_HOUR", 23, 0, 23),
             quiet_end_hour=number("QUIET_END_HOUR", 8, 0, 23),
             max_ai_calls_per_day=number("MAX_AI_CALLS_PER_DAY", 200, 1, 10000),

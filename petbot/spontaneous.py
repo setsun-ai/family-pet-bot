@@ -27,6 +27,7 @@ class Spontaneous:
     def __init__(self, settings, db, ai, delivery, mood=None, rng: random.Random | None = None):
         self.settings, self.db, self.ai, self.delivery, self.mood = settings, db, ai, delivery, mood
         self.rng = rng or random.Random()
+        self.context = None  # ChatContext (CHAT_CONTEXT): what the family is writing right now
 
     def _window(self) -> tuple[int, int]:
         start, end = self.settings.quiet_end_hour + 1, self.settings.quiet_start_hour - 1
@@ -68,5 +69,7 @@ class Spontaneous:
                 memory = self.rng.choice(recent)
                 facts["memory"] = f"{datetime.fromisoformat(memory['created_at']).astimezone(self.settings.tz):%d.%m}: " \
                                   f"{memory['fact']}"
+        if self.context:
+            facts["chat"] = self.context.render(self.context.recent(chat, ACTIVE.total_seconds())) or None
         text = await self.ai.post("spontaneous", facts, max_parts=1, maximum=200)
         return await self.delivery.send(chat, text, [("spontaneous", plan["day"])])

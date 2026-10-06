@@ -23,6 +23,7 @@ from . import __version__, updater
 from .ai import AIService
 from .common import ChatLocks, RateLimiter, ServiceError, addressed, asks_for_news, limit_text, names_pattern
 from .config import Settings
+from .context import ChatContext
 from .core import check_text, help_text, memory_text, mood_text, preview_text, stats_text, status_text  # noqa: F401
 from .db import Database
 from .delivery import DeliveryService
@@ -69,11 +70,17 @@ class App:
     dispatcher: object | None = None  # aiogram Dispatcher, so /update can stop polling and restart
     updating: bool = False
     stop_task: asyncio.Task | None = None
+    context: ChatContext | None = None  # CHAT_CONTEXT: recent family messages, in memory only
 
     def __post_init__(self):
         self.names = names_pattern(self.settings.bot_names)
         if self.housekeeping is None:
             self.housekeeping = Housekeeping(self)
+        if self.context is None:
+            self.context = ChatContext(self.settings.chat_context, self.settings.display_name)
+        self.delivery.context = self.context  # the pet's own messages belong to the conversation too
+        if getattr(self.scheduler, "spontaneous", None) is not None:
+            self.scheduler.spontaneous.context = self.context
 
 
 async def reply(message: Message, text: str, app: App, *, transient: bool = True) -> None:
@@ -191,6 +198,7 @@ async def handle(message: Message, app: App) -> None:
             return
         async with app.locks.hold(message.chat.id):
             await app.db.forget(message.chat.id)
+            app.context.forget(message.chat.id)
         await reply(message, t("forget_done", platform="Telegram"), app)
         return
     team = app.sports.team(command)
@@ -215,8 +223,11 @@ async def handle(message: Message, app: App) -> None:
 
     # --- conversation ---
     reply_author = message.reply_to_message.from_user if message.reply_to_message else None
-    if not is_private and not addressed(text, app.me.username or "", reply_author.id if reply_author else None,
-                                        app.me.id, app.names):
+    to_pet = is_private or addressed(text, app.me.username or "", reply_author.id if reply_author else None,
+                                     app.me.id, app.names)
+    if not is_private:
+        await remember_line(message, app, text, addressed=to_pet)
+    if not to_pet:
         if app.noticer and not command:
             await app.noticer.notice(app, message.chat.id, message.message_id, user.id, text,
                                      lambda emoji: message.react([ReactionTypeEmoji(emoji=emoji)]))
@@ -247,11 +258,48 @@ async def handle(message: Message, app: App) -> None:
         context = None
         if message.reply_to_message and reply_author and reply_author.id == app.me.id:
             context = message.reply_to_message.text or message.reply_to_message.caption
+        chat_log = None
+        if not is_private and app.context:
+            chat_log = app.context.render(app.context.recent(message.chat.id), skip=message.message_id) or None
         answer = await app.ai.chat(history, text, display_name, reply_context=context,
-                                   verified_name=nickname is not None, chat_id=message.chat.id)
+                                   verified_name=nickname is not None, chat_id=message.chat.id, chat_log=chat_log)
         sent = await app.delivery.send(message.chat.id, answer, [("dialog", str(message.message_id))], message.message_id)
         if sent:
             await app.db.save_exchange(message.chat.id, f"{display_name[:100]}: {text}", answer, s.history_keep)
+
+
+def forwarded_from(message: Message) -> str | None:
+    origin = message.forward_origin
+    if origin is None:
+        return None
+    chat = getattr(origin, "chat", None) or getattr(origin, "sender_chat", None)
+    user = getattr(origin, "sender_user", None)
+    return (chat.title if chat else None) or (user.full_name if user else None) or \
+        getattr(origin, "sender_user_name", None) or "?"
+
+
+def media_label(message: Message) -> str:
+    if message.sticker:
+        return f"[sticker {message.sticker.emoji}]" if message.sticker.emoji else "[sticker]"
+    if message.animation:
+        return "[GIF]"
+    if message.video:
+        return "[video]"
+    return "[photo]" if message.photo else ""
+
+
+async def remember_line(message: Message, app: App, text: str, *, addressed: bool = False) -> None:
+    """CHAT_CONTEXT: keep this family message in memory, so the pet knows what the conversation is about."""
+    if not app.context or message.chat.id != await app.db.family():
+        return
+    user = message.from_user
+    author = await app.db.family_name(user.id) or user.first_name or user.username or t("someone")
+    source = forwarded_from(message)
+    if source:
+        text = f"[forwarded from {source}] {text}"
+    app.context.add(message.chat.id, message.message_id, author, text, user_id=user.id, addressed=addressed,
+                    react=lambda emoji: message.react([ReactionTypeEmoji(emoji=emoji)]),
+                    reply_to=message.reply_to_message.message_id if message.reply_to_message else None)
 
 
 async def notice_media(message: Message, app: App) -> None:
@@ -264,6 +312,7 @@ async def notice_media(message: Message, app: App) -> None:
         return
     caption = (message.caption or "").strip()
     app.scheduler.note_activity(message.chat.id, text=caption)
+    await remember_line(message, app, f"{media_label(message)} {caption}".strip())
     await app.noticer.notice(app, message.chat.id, message.message_id, user.id, caption,
                              lambda emoji: message.react([ReactionTypeEmoji(emoji=emoji)]), media=True)
 
@@ -452,6 +501,7 @@ def make_router(app: App) -> Router:
         try:
             await handle(message, app)
         except ServiceError as error:
+            log.info("No answer: %s", error.key)  # group notices vanish after NOTICE_SECONDS: keep a trace
             try:
                 await reply(message, "⚠️ " + str(error), app)
             except TelegramAPIError:

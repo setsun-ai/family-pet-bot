@@ -78,7 +78,7 @@ Step by step: **[Getting started](docs/en/getting-started.md)** · **[Discord](d
 | Messages addressed to the pet | up to 50 lines per chat | the message, the author's name and up to 8 recent lines of that chat | local: `HISTORY_DAYS` (30); provider: per its terms (OpenAI requests use `store: false`) |
 | Facts the pet remembers | up to 40 short facts per chat | as context in later answers | `MEMORY_DAYS` (60); `/forget` clears them at once |
 | Persona file, family file (hobbies, birthdays) | your own `*.local.*` files | the persona with every request; a person's name and `about` text for praise and birthdays | until you edit the files |
-| Other group messages | never stored | never sent | – |
+| Other group messages | never stored | never sent - unless `CHAT_CONTEXT=N` is on: then the last N (kept in memory only) go with answers, glances at the chat and the pet's own messages | in memory, at most 3 hours; gone after a restart or `/forget` |
 | Telegram/Discord user IDs, nicknames | access control, `/name` | no | until `/unname` or `/deny` |
 
 - **Logs:** never contain message content, prompts or secrets. Error lines name only the exception type, and tokens and API keys are redacted, even inside library tracebacks (`tests/test_log_privacy.py`).

@@ -27,6 +27,7 @@ from discord import app_commands
 from .ai import AIService
 from .common import ChatLocks, RateLimiter, ServiceError, asks_for_news, limit_text, names_pattern
 from .config import Settings
+from .context import ChatContext
 from .core import check_text, help_text, memory_text, mood_text, preview_text, stats_text, status_text
 from .db import Database
 from .delivery import RATE_LIMITED, REJECTED, UNCERTAIN, Delivery
@@ -103,9 +104,15 @@ class DiscordApp:
     mood: MoodService | None = None
     last_check_ok: bool = False
     active_tasks: set[asyncio.Task] = field(default_factory=set)
+    context: ChatContext | None = None  # CHAT_CONTEXT: recent family messages, in memory only
 
     def __post_init__(self):
         self.names = names_pattern(self.settings.bot_names)
+        if self.context is None:
+            self.context = ChatContext(self.settings.chat_context, self.settings.display_name)
+        self.delivery.context = self.context
+        if getattr(self.scheduler, "spontaneous", None) is not None:
+            self.scheduler.spontaneous.context = self.context
 
 
 # --- conversation --------------------------------------------------------------------------------
@@ -120,6 +127,16 @@ async def _replied_message(message: discord.Message) -> discord.Message | None:
         return await message.channel.fetch_message(ref.message_id)
     except (discord.DiscordException, aiohttp.ClientError, TimeoutError):
         return None
+
+
+async def remember_line(app: DiscordApp, message: discord.Message, text: str, *, addressed: bool = False,
+                        reply_to: int | None = None) -> None:
+    """CHAT_CONTEXT: keep this family message in memory, so the pet knows what the conversation is about."""
+    if not app.context or message.channel.id != await app.db.family():
+        return
+    author = await app.db.family_name(message.author.id) or message.author.display_name or t("someone")
+    app.context.add(message.channel.id, message.id, author, text, user_id=message.author.id, addressed=addressed,
+                    react=message.add_reaction, reply_to=reply_to)
 
 
 async def handle_message(app: DiscordApp, message: discord.Message) -> None:
@@ -141,6 +158,7 @@ async def handle_message(app: DiscordApp, message: discord.Message) -> None:
         app.scheduler.note_activity(chat_id, text=text)
     if media and not is_private and app.noticer and not (app.names and app.names.search(text)) and \
             me not in message.mentions and await app.access.allowed(user.id, chat_id, GROUP):
+        await remember_line(app, message, ("[media] " + text).strip())
         await app.noticer.notice(app, chat_id, message.id, user.id, text, message.add_reaction, media=True)
         return
     if not text:
@@ -160,7 +178,10 @@ async def handle_message(app: DiscordApp, message: discord.Message) -> None:
 
     replied = await _replied_message(message)
     to_me = replied is not None and replied.author.id == me.id
-    if not is_private and not (to_me or me in message.mentions or (app.names and app.names.search(text))):
+    to_pet = to_me or me in message.mentions or bool(app.names and app.names.search(text))
+    if not is_private:
+        await remember_line(app, message, text, addressed=to_pet, reply_to=replied.id if replied else None)
+    if not is_private and not to_pet:
         if app.noticer:
             await app.noticer.notice(app, chat_id, message.id, user.id, text, message.add_reaction)
         return
@@ -183,9 +204,12 @@ async def handle_message(app: DiscordApp, message: discord.Message) -> None:
         history = await app.db.history(chat_id, s.history_messages, s.history_days)
         nickname = await app.db.family_name(user.id)
         display_name = nickname or user.display_name or t("someone")
+        chat_log = None
+        if not is_private and app.context:
+            chat_log = app.context.render(app.context.recent(chat_id), skip=message.id) or None
         async with message.channel.typing():
             answer = await app.ai.chat(history, text, display_name, reply_context=replied.content if to_me else None,
-                                       verified_name=nickname is not None, chat_id=chat_id)
+                                       verified_name=nickname is not None, chat_id=chat_id, chat_log=chat_log)
         if await app.delivery.send(chat_id, answer, [("dialog", str(message.id))], message.id):
             await app.db.save_exchange(chat_id, f"{display_name[:100]}: {text}", answer, s.history_keep)
 
@@ -291,6 +315,7 @@ async def cmd_forget(app, interaction) -> None:
         return
     async with app.locks.hold(chat_id):
         await app.db.forget(chat_id)
+        app.context.forget(chat_id)
     await respond(interaction, t("forget_done", platform="Discord"), app)
 
 

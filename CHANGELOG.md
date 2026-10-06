@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.0 (2026-10)
+
+The pet can follow the conversation.
+
+- **`CHAT_CONTEXT=N`** (off by default): the AI sees the last N messages of the family group (at most 3 hours old, kept in memory only, never on disk, cleared by a restart or `/forget`). Answers understand what everybody is talking about ("give me your phone" after a talk about getting up), and a message the pet starts itself (`SPONTANEOUS_PER_WEEK`) fits what the family is writing at that moment instead of a random line. Forwarded posts are marked with their source, pictures as `[photo]`/`[GIF]`/`[sticker]`, replies point at the message they answer. **Family messages are sent to the AI provider** with this on: PRIVACY.md and the README say so.
+- **Glancing at the chat** (with `CHAT_CONTEXT`): instead of the local "vibe" rule, after 3+ new messages and a ~75-second pause (or at once after 10), at most every 15 minutes and 20 times a day, one AI call (structured output) decides on an emoji under 0-2 messages that fit them and maybe one short line, as a reply (`CHIME_IN_PER_DAY` lines a day, at most one an hour, never within 10 minutes of its own message or about air raids). The keyword reactions and cheers stay as they were and don't get a second emoji.
+- An unanswered message addressed to the pet is logged with the reason (`No answer: ai_...`): in groups the error notice disappears after `NOTICE_SECONDS`, so there was no trace.
+
 ## 1.2.1 (2026-10)
 
 - **`/update` from Telegram** (owner, private chat): downloads the newest GitHub release, runs `pip install -r requirements.txt` only if it changed, starts the new code once (imports + `check-config`) and only then swaps `petbot/` and restarts itself. `.env`, personas, `*.local.json` and `data/` are never touched. If anything fails, the old version keeps running and the error is shown.

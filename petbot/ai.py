@@ -22,6 +22,7 @@ from .config import Settings
 from .db import Database
 from .i18n import prompt, weekday_name
 from .persona import load_persona, tidy_messages, wants_detail
+from .reactions import TELEGRAM_REACTIONS, normalize
 
 log = logging.getLogger(__name__)
 
@@ -36,6 +37,21 @@ CHAT_SCHEMA = {
     "type": "object",
     "properties": {"reply": {"type": "string"}, "remember": {"type": "string"}},
     "required": ["reply", "remember"],
+    "additionalProperties": False,
+}
+
+# A glance at the family chat (CHAT_CONTEXT): emoji under a few messages and maybe one line.
+GLANCE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "react": {"type": "array", "items": {
+            "type": "object",
+            "properties": {"n": {"type": "integer"}, "emoji": {"type": "string", "enum": sorted(TELEGRAM_REACTIONS)}},
+            "required": ["n", "emoji"], "additionalProperties": False}},
+        "say": {"type": "string"},
+        "reply_to": {"type": "integer"},
+    },
+    "required": ["react", "say", "reply_to"],
     "additionalProperties": False,
 }
 
@@ -54,6 +70,13 @@ NO_THINKING = {
 
 class AIError(ServiceError):
     pass
+
+
+@dataclass(frozen=True)
+class Glance:
+    reactions: tuple[tuple[int, str], ...] = ()  # (line number, emoji)
+    say: str = ""
+    reply_to: int = 0
 
 
 @dataclass(frozen=True)
@@ -178,7 +201,8 @@ class AIService:
         log.warning("%s", self.last_error)  # only our own sanitized text
 
     async def chat(self, history: list[dict], text: str, name: str, *,
-                   reply_context: str | None = None, verified_name: bool = False, chat_id: int | None = None) -> str:
+                   reply_context: str | None = None, verified_name: bool = False, chat_id: int | None = None,
+                   chat_log: str | None = None) -> str:
         messages: list[dict] = []
         for row in history[-self.settings.history_messages:]:
             role = row.get("role")
@@ -206,8 +230,9 @@ class AIService:
                      for m in await self.db.memories(chat_id, self.settings.memory_days)]
             memory = prompt("memory_rules") + ("\n" + prompt("memory_info") + " " + json.dumps(facts, ensure_ascii=False)
                                                if facts else "")
+        log_part = prompt("chat_log") + "\n" + chat_log if chat_log else ""
         system = "\n\n".join(part for part in (self.persona, self._emoji_rule(), prompt("chat_rules"), length,
-                                                await self._mood_line(), memory, self._now(),
+                                                await self._mood_line(), memory, self._now(), log_part,
                                                 prompt("author_info") + " " + identity) if part)
         if reply_context:
             system += "\n" + prompt("reply_context") + " " + json.dumps(reply_context[:1800], ensure_ascii=False)
@@ -231,6 +256,23 @@ class AIService:
         if not reply.strip():
             raise AIError("ai_empty")
         return reply
+
+    async def glance(self, chat_log: str, *, allow_say: bool) -> Glance:
+        """A look at the family chat nobody asked the pet about: reactions and maybe one line (notice.py)."""
+        task = prompt("glance", say_rule="" if allow_say else prompt("glance_silent"))
+        system = "\n\n".join(part for part in (self.persona, self._emoji_rule(), await self._mood_line(), self._now(),
+                                                task) if part)
+        raw = await self.complete(system, [{"role": "user", "content": chat_log}], json_output=True, max_tokens=300,
+                                  purpose="glance", schema=GLANCE_SCHEMA)
+        try:
+            value = json.loads(raw)
+            reactions = tuple((int(r["n"]), normalize(r["emoji"])) for r in value["react"]
+                              if normalize(r["emoji"]) in TELEGRAM_REACTIONS)
+            first = next((part for part in str(value["say"]).splitlines() if part.strip()), "")  # one line, not a speech
+            say = tidy_messages(first, self.settings.persona_emoji, 160, max_parts=1) if allow_say else ""
+            return Glance(reactions[:2], say, int(value.get("reply_to") or 0))
+        except (ValueError, TypeError, KeyError):
+            raise AIError("ai_bad_json") from None
 
     async def news(self, title: str, summary: str) -> NewsDecision:
         system = "\n\n".join(part for part in (self.persona, self._emoji_rule(), prompt("news_task")) if part)

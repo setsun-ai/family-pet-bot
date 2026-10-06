@@ -54,7 +54,7 @@ def make_noticer(settings: Settings, family, platform: str):
 
     rules = load_reactions(settings.reactions_file, platform)
     reader = Reader(tuple(m.name for m in family.members)) if settings.sentiment_enabled else None
-    return Noticer(reader, rules) if rules or reader else None
+    return Noticer(reader, rules) if rules or reader or settings.chat_context else None
 
 
 async def run(settings: Settings, check: bool = False) -> int:
