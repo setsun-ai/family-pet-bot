@@ -121,7 +121,7 @@ def test_the_real_selftest_finds_the_projects_settings(tmp_path):
 
     def selftest():
         return subprocess.run([sys.executable, "-c", updater.SELFTEST, str(new)], cwd=project, capture_output=True,
-                              text=True, timeout=120, env=clean)
+                              text=True, encoding="utf-8", errors="replace", timeout=120, env=clean)
 
     missing = selftest()  # no .env in the project yet: the new code must not look for one in .update/new
     assert missing.returncode != 0 and "BOT_TOKEN" in missing.stdout + missing.stderr
