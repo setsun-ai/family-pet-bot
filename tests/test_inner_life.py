@@ -264,7 +264,8 @@ class MemoryCommandTests(unittest.IsolatedAsyncioTestCase):
 
 class SpontaneousTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.h = await Harness().open(spontaneous_per_week=7, memory_enabled=True, timezone="Europe/Warsaw")
+        self.h = await Harness().open(spontaneous_per_week=7, memory_enabled=True, timezone="Europe/Warsaw",
+                                      own_lines="ai")
         self.h.ai.post.return_value = "Ну что, как экзамен?"
         self.h.scheduler.spontaneous = Spontaneous(self.h.settings, self.h.db, self.h.ai, self.h.delivery,
                                                    rng=random.Random(4))
@@ -347,7 +348,8 @@ class CasualMatchTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         from petbot.sports import parse_tsdb_event
         from tests.support import TEAM, event
-        self.h = await Harness().open(sports_enabled=True, sports_style="casual", timezone="Europe/Warsaw")
+        self.h = await Harness().open(sports_enabled=True, sports_style="casual", timezone="Europe/Warsaw",
+                                      own_lines="ai")
         self.state = self.h.sports.state[TEAM.key]
         self.state.upcoming = parse_tsdb_event(event(strTimestamp="2026-10-10T16:00:00"), "1001")  # 18:00 in Warsaw
         self.state.fetched = datetime(2026, 10, 10, 17, 40, tzinfo=WARSAW)
@@ -418,7 +420,7 @@ class CasualMatchTests(unittest.IsolatedAsyncioTestCase):
 
 class ChimeInTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.h = await Harness().open(chime_in_per_day=2)
+        self.h = await Harness().open(chime_in_per_day=2, own_lines="ai")
         rng = random.Random(2)
         rng.random = lambda: 0.0  # always in the mood, so the test is about the rules, not luck
         self.h.app.noticer = Noticer(Reader(("Anna", "Mom")), None, delay=(0, 0), rng=rng)

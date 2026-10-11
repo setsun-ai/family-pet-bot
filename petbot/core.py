@@ -184,6 +184,10 @@ async def preview_text(app, args: str) -> str | None:
             if decision.accepted:
                 return f"{decision.text}\n\n{t('news_source', date=f'{article.published:%d.%m.%Y}', link=article.link)}"
         return ""
+    if what == "spontaneous" and app.settings.own_lines == "local":
+        from .lines import Lines
+        mood = await app.mood.current() if getattr(app, "mood", None) else None
+        return await Lines(app.db).spontaneous(mood.name if mood else None, now.hour, remember=False)
     if what == "spontaneous":
         facts = {"today": f"{weekday_name(now.weekday())} {now:%d.%m %H:%M}", "memory": who or None}
         return await app.ai.post("spontaneous", facts, max_parts=1, maximum=200)

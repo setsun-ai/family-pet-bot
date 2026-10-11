@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.0 (2026-10)
+
+What the pet says unasked no longer comes from the AI.
+
+- **`OWN_LINES=local`** (the new default): speaking up on its own (`SPONTANEOUS_PER_WEEK`), chiming into a lively conversation (`CHIME_IN_PER_DAY`) and the casual match lines (`SPORTS_STYLE=casual`: "watching?", the score with an emotion, the sulky "nobody watched") come from ready lines in `petbot/lines.py`, in Russian and English: by mood and time of day, by the vibe of the conversation, by win / draw / loss. A line never comes back before half of its list has been used (remembered in the database). The AI now writes only answers to messages addressed to the pet and birthday wishes (plus the opt-in `CHAT_CONTEXT` glances, `/news` and `SPORTS_STYLE=full` analysis).
+- `OWN_LINES=ai` brings back the AI-written lines, including questions about remembered facts ("so how was the exam?") in spontaneous messages.
+- Match lines never decline team names ("Team — Opponent"), so Russian cases can't go wrong.
+- `/preview spontaneous` shows a ready line without using it up.
+
 ## 1.5.0 (2026-10)
 
 - **Edited messages.** Adding the pet's name to a message afterwards ("..., Whiskers?") now gets an answer, once, if the edit comes within 5 minutes. An edit never gets a second reaction, never re-runs a command and never answers twice. Telegram: the bot now also receives `edited_message` updates; Discord: `on_message_edit`.

@@ -8,8 +8,8 @@ What the pet does with a family message nobody addressed to it - locally, withou
 2. Otherwise the keyword rules of REACTIONS_FILE (reactions.py) may add an emoji.
 3. Chiming in (CHIME_IN_PER_DAY): when the family is in a lively conversation (6+
    messages from 2+ people within 10 minutes) with a clear vibe - laughing,
-   celebrating, sad, talking about food - the pet joins with one short line.
-   The AI gets only that one word and the people's names, never the messages.
+   celebrating, sad, talking about food - the pet joins with one short ready line (lines.py);
+   with OWN_LINES=ai the AI writes it from that one word and the names, never the messages.
 4. With CHAT_CONTEXT (context.py) the pet instead GLANCES at the chat: when a few
    new messages have piled up and the conversation pauses for a moment, one AI call
    sees the recent messages and decides where an emoji fits and whether the pet has
@@ -40,6 +40,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 
 from .common import ServiceError
+from .lines import Lines
 from .linkpeek import first_link
 from .phrases import cheer
 from .reactions import Reactions
@@ -311,7 +312,10 @@ class Noticer:
         self.chimes[chat_id] = done + [now]
         self.recent[chat_id].clear()
         try:
-            text = await app.ai.post("chime_in", {"vibe": vibe, "people": names or None}, max_parts=1, maximum=160)
+            if s.own_lines == "local":
+                text = await Lines(app.db, self.rng).chime(vibe)
+            else:
+                text = await app.ai.post("chime_in", {"vibe": vibe, "people": names or None}, max_parts=1, maximum=160)
             return await app.delivery.send(chat_id, text, [("chime", f"{local:%Y-%m-%d %H:%M}")])
         except ServiceError as error:
             log.info("Chime-in skipped (%s)", error)

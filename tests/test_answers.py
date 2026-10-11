@@ -177,7 +177,7 @@ class LinkReactions(unittest.IsolatedAsyncioTestCase):
 
 class QuietAfterNews(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.h = await Harness().open(spontaneous_per_week=7, timezone="Europe/Warsaw")
+        self.h = await Harness().open(spontaneous_per_week=7, timezone="Europe/Warsaw", own_lines="ai")
         self.h.ai.post.return_value = "Мрр, какой сонный день"
         self.h.scheduler.spontaneous = Spontaneous(self.h.settings, self.h.db, self.h.ai, self.h.delivery,
                                                    rng=random.Random(4))

@@ -8,9 +8,9 @@ day and from what time. The message is sent only while the family chat is alive
 newsletter does, not a cat. The mood decides too: an offended or sleepy cat
 often postpones it.
 
-What it says: if it remembers something recent (MEMORY_ENABLED), it may ask
-about it ("so how was the exam?"); otherwise something in its current mood.
-One AI call, one short message.
+What it says: a ready line for its mood and the time of day (lines.py, OWN_LINES=local,
+the default - no AI). With OWN_LINES=ai one AI call writes it: if the pet remembers
+something recent (MEMORY_ENABLED), it may ask about it ("so how was the exam?").
 
 Never right after somebody shared a link or a forwarded post, or after bad news or an
 alarm (scheduler.hush): small talk right under news about a strike is the worst
@@ -29,6 +29,7 @@ import random
 from datetime import datetime, timedelta
 
 from .i18n import weekday_name
+from .lines import Lines
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ class Spontaneous:
         self.rng = rng or random.Random()
         self.context = None  # ChatContext (CHAT_CONTEXT): what the family is writing right now
         self.hush_logged: datetime | None = None
+        self.lines = Lines(db, self.rng)
 
     def _window(self) -> tuple[int, int]:
         start, end = self.settings.quiet_end_hour + 1, self.settings.quiet_start_hour - 1
@@ -95,6 +97,15 @@ class Spontaneous:
             return False
         plan["done"] = True
         await self.db.set("spontaneous_plan", json.dumps(plan))  # never twice a day, even if the AI fails
+        if self.settings.own_lines == "local":
+            text = await self.lines.spontaneous(mood.name if mood else None, local.hour)
+        else:
+            text = await self._ai_line(chat, local)
+        sent = await self.delivery.send(chat, text, [("spontaneous", plan["day"])])
+        log.info("Spontaneous message %s", "sent" if sent else "not sent")
+        return sent
+
+    async def _ai_line(self, chat: int, local: datetime) -> str:
         facts = {"today": f"{weekday_name(local.weekday())} {local:%d.%m %H:%M}", "memory": None}
         if self.settings.memory_enabled:
             recent = await self.db.memories(chat, 14)
@@ -104,7 +115,4 @@ class Spontaneous:
                                   f"{memory['fact']}"
         if self.context:
             facts["chat"] = self.context.render(self.context.recent(chat, ACTIVE.total_seconds())) or None
-        text = await self.ai.post("spontaneous", facts, max_parts=1, maximum=200)
-        sent = await self.delivery.send(chat, text, [("spontaneous", plan["day"])])
-        log.info("Spontaneous message %s", "sent" if sent else "not sent")
-        return sent
+        return await self.ai.post("spontaneous", facts, max_parts=1, maximum=200)

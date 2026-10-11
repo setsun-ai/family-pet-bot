@@ -91,6 +91,7 @@ class Settings:
     memory_days: int = 60
     spontaneous_per_week: float = 0  # speak up on its own, on average this many times a week
     chime_in_per_day: int = 0  # join a lively family conversation (by its local "vibe"), at most this often a day
+    own_lines: str = "local"  # what the pet says unasked: "local" ready lines (lines.py) or "ai"
     chat_context: int = 0  # the AI sees the last N family messages (kept in memory only); 0 = it sees none
     # quiet hours, limits, memory
     quiet_start_hour: int = 23
@@ -224,6 +225,9 @@ class Settings:
             raise ConfigError("PRAISE_UNTIL_HOUR must be later than PRAISE_HOUR.")
 
         sports_style = text("SPORTS_STYLE", "full").lower() or "full"
+        own_lines = text("OWN_LINES", "local").lower() or "local"
+        if own_lines not in {"local", "ai"}:
+            raise ConfigError("OWN_LINES: use local or ai.")
         if sports_style not in {"full", "casual"}:
             raise ConfigError("SPORTS_STYLE: use full or casual.")
         sports_command = (text("SPORTS_COMMAND", "match") or "match").lstrip("/").lower()
@@ -260,7 +264,7 @@ class Settings:
             link_preview=flag("LINK_PREVIEW", True),
             memory_enabled=flag("MEMORY_ENABLED", False), memory_days=number("MEMORY_DAYS", 60, 1, 365),
             spontaneous_per_week=number("SPONTANEOUS_PER_WEEK", 0, 0, 7),
-            chime_in_per_day=number("CHIME_IN_PER_DAY", 0, 0, 10),
+            chime_in_per_day=number("CHIME_IN_PER_DAY", 0, 0, 10), own_lines=own_lines,
             chat_context=number("CHAT_CONTEXT", 0, 0, 60),
             quiet_start_hour=number("QUIET_START_HOUR", 23, 0, 23),
             quiet_end_hour=number("QUIET_END_HOUR", 8, 0, 23),

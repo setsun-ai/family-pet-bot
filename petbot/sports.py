@@ -33,6 +33,7 @@ from bs4 import BeautifulSoup
 
 from .common import ServiceError, fetch_bytes
 from .i18n import t
+from .lines import Lines
 
 log = logging.getLogger(__name__)
 
@@ -551,6 +552,7 @@ class SportsService:
         self.settings, self.client, self.ai, self.teams = settings, client, ai, teams
         self.state: dict[str, TeamState] = {team.key: TeamState() for team in teams}
         self.lock = asyncio.Lock()
+        self.lines = Lines()  # OWN_LINES=local: ready match lines, the recent ones remembered in memory
         self.upl_kickoffs: dict[str, datetime | None] = {}  # report link -> kick-off (the calendar hides it once a score shows)
 
     def team(self, command: str) -> Team | None:
@@ -722,12 +724,16 @@ class SportsService:
         """SPORTS_STYLE=casual: one line at kick-off, like a fan calling the family to the TV. No table, no stats."""
         data = facts(match, team, {}, self.settings.tz)
         short = {k: data[k] for k in ("our_team", "opponent", "we_play_at_home", "competition")}
-        if self.ai is not None and team.analysis:
+        if self._ai_lines(team):
             try:
                 return await self.ai.post("match_kickoff", short, max_parts=1, maximum=160)
             except ServiceError:
                 pass
-        return t("sports_kickoff", team=team.name, opponent=data["opponent"])
+        return await self.lines.kickoff(team.name, data["opponent"], match.team_is_home)
+
+    def _ai_lines(self, team: Team) -> bool:
+        """Casual match lines from the AI only with OWN_LINES=ai and the team's analysis on."""
+        return self.ai is not None and team.analysis and getattr(self.settings, "own_lines", "local") == "ai"
 
     async def casual_result(self, team: Team, match: Match) -> str:
         """SPORTS_STYLE=casual: the score and an emotion, one line."""
@@ -738,13 +744,13 @@ class SportsService:
         short = {"our_team": team.name, "opponent": data["opponent"], "score_ours_first": f"{ours}:{theirs}",
                  "result_for_our_team": match.outcome()}
         text = ""
-        if self.ai is not None and team.analysis:
+        if self._ai_lines(team):
             try:
                 text = await self.ai.post("match_result_casual", short, max_parts=1, maximum=160)
             except ServiceError:
                 pass
         if not text:
-            return describe(match, self.settings.tz)
+            text = await self.lines.result(f"{ours}:{theirs}", match.outcome())
         if not mentions_score(text, match.score):
             text = f"{ours}:{theirs}. {text}"
         return text
@@ -755,12 +761,12 @@ class SportsService:
         ours, theirs = (match.score.split(":") if match.team_is_home else match.score.split(":")[::-1])
         short = {"our_team": team.name, "opponent": data["opponent"], "score_ours_first": f"{ours}:{theirs}",
                  "result_for_our_team": match.outcome()}
-        if self.ai is not None and team.analysis:
+        if self._ai_lines(team):
             try:
                 return await self.ai.post("match_result_ignored", short, max_parts=1, maximum=120)
             except ServiceError:
                 pass
-        return t("sports_ignored")
+        return await self.lines.ignored(f"{ours}:{theirs}")
 
     async def result_message(self, team: Team, match: Match, next_match: Match | None) -> str:
         if match.status != "finished" or not match.score:
