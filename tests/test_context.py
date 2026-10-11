@@ -107,9 +107,9 @@ class ContextTests(unittest.IsolatedAsyncioTestCase):
         origin = MessageOriginChannel(date=datetime.now(UTC), chat=Chat(id=-77, type="channel", title="Daily News"),
                                       message_id=5)
         self.h.ai.glance.return_value = Glance()
-        await self.say(MOM, "McDonald's removed 11 burgers", forward_origin=origin)
+        await self.say(MOM, "The bakery on the corner closes early", forward_origin=origin)
         line = self.h.app.context.recent(FAMILY)[0]
-        self.assertEqual(line.text, "[forwarded from Daily News] McDonald's removed 11 burgers")
+        self.assertEqual(line.text, "[forwarded from Daily News] The bakery on the corner closes early")
         await handle(self.h.message("/forget", uid=OWNER, chat=FAMILY, mid=999), self.h.app)
         self.assertEqual(self.h.app.context.recent(FAMILY), [])
 

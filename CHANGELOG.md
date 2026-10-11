@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.4.0 (2026-10)
+
+The pet decides locally when to react and when to keep quiet. No new AI calls.
+
+- **Answers without a reply.** "Канешн" after the pet's "смотрим?", or "Отстань" right after it teased someone: one of the first two family messages after the pet's own message (within 5 minutes, 15 after a question; after a conversation answer only from that same person) gets one emoji picked by local rules - 👍 for "yes", 😇 for grumbling, 😁 for laughter, ❤ otherwise. An answer to the match-start call counts as "watching", so the pet no longer sulks "nobody watched" when somebody did. Counts in `/stats` like a reply.
+- **Links** (`LINK_PREVIEW`, on with `SENTIMENT_ENABLED`): Telegram never gives a bot the link preview, so news like "a café closes early today" looked harmless while the reason ("because of the shelling") was only on the page. The pet now reads the page's title and description itself (https, public addresses only, 512 KB, 8 s; video, music and social sites skipped) with the same dictionary - a quiet 😢 for alarms and clear bad news, never a cheer. No AI; the site sees an ordinary visit (PRIVACY.md).
+- **Ukrainian alarm words** (обстріл, тривога, укриття, вибух, ракета, шахед, атака...) for forwarded Ukrainian news; "відбій" ends an alarm like "отбой".
+- **No small talk under news.** A message the pet starts itself (`SPONTANEOUS_PER_WEEK`) waits 45 minutes after a link, a forwarded post, bad news or an alarm in the chat.
+- **Wake words:** е and ё are the same letter - "Сема" wakes "Сёма".
+- **Log file** `logs/bot.log` (`LOG_FILE`, rotated at 1 MB, empty = off): a Raspberry Pi with little memory keeps the system journal only for hours. New short lines without message content: "Reaction 😢 (alarm)", "Answered a message addressed to the pet", "Skipped a message older than 5 minutes", "Spontaneous message postponed...". aiogram's "Update id=... is handled" line per message is gone.
+- Fix: a post with a time "in the future" (the clock went back, or tests run after their fixed date) blocked further posts until the clock caught up.
+
 ## 1.3.0 (2026-10)
 
 The pet can follow the conversation.

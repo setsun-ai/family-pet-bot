@@ -11,16 +11,24 @@ often postpones it.
 What it says: if it remembers something recent (MEMORY_ENABLED), it may ask
 about it ("so how was the exam?"); otherwise something in its current mood.
 One AI call, one short message.
+
+Never right after somebody shared a link or a forwarded post, or after bad news or an
+alarm (scheduler.hush): small talk right under news about a strike is the worst
+timing a cat can have. It waits HUSH, then tries again while the chat is alive.
 """
 from __future__ import annotations
 
 import json
+import logging
 import random
 from datetime import datetime, timedelta
 
 from .i18n import weekday_name
 
+log = logging.getLogger(__name__)
+
 ACTIVE = timedelta(minutes=15)
+HUSH = timedelta(minutes=45)
 
 
 class Spontaneous:
@@ -28,6 +36,7 @@ class Spontaneous:
         self.settings, self.db, self.ai, self.delivery, self.mood = settings, db, ai, delivery, mood
         self.rng = rng or random.Random()
         self.context = None  # ChatContext (CHAT_CONTEXT): what the family is writing right now
+        self.hush_logged: datetime | None = None
 
     def _window(self) -> tuple[int, int]:
         start, end = self.settings.quiet_end_hour + 1, self.settings.quiet_start_hour - 1
@@ -46,14 +55,20 @@ class Spontaneous:
             await self.db.set("spontaneous_plan", json.dumps(plan))
         return plan
 
-    async def tick(self, chat: int, now: datetime, last_activity: datetime | None) -> bool:
-        """True if the pet said something."""
+    async def tick(self, chat: int, now: datetime, last_activity: datetime | None,
+                   hushed: datetime | None = None) -> bool:
+        """True if the pet said something. `hushed`: the last link, forwarded post or bad news in the chat."""
         local = now.astimezone(self.settings.tz)
         plan = await self._plan(local)
         if not plan["chatty"] or plan["done"] or local < datetime.fromisoformat(plan["at"]):
             return False
         if last_activity is None or now - last_activity > ACTIVE:
             return False  # wait until someone is around
+        if hushed and timedelta(0) <= now - hushed < HUSH:
+            if self.hush_logged != hushed:
+                self.hush_logged = hushed
+                log.info("Spontaneous message postponed: a link, a forwarded post or bad news in the chat")
+            return False
         mood = await self.mood.current(now) if self.mood else None
         if mood and self.rng.random() > min(1.0, mood.chatty):
             # not in the mood: maybe later today
@@ -72,4 +87,6 @@ class Spontaneous:
         if self.context:
             facts["chat"] = self.context.render(self.context.recent(chat, ACTIVE.total_seconds())) or None
         text = await self.ai.post("spontaneous", facts, max_parts=1, maximum=200)
-        return await self.delivery.send(chat, text, [("spontaneous", plan["day"])])
+        sent = await self.delivery.send(chat, text, [("spontaneous", plan["day"])])
+        log.info("Spontaneous message %s", "sent" if sent else "not sent")
+        return sent

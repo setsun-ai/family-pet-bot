@@ -58,6 +58,7 @@ journalctl -u family-pet-bot -n 30 --no-pager
 | Что | Команда |
 |---|---|
 | Журнал в реальном времени | `journalctl -u family-pet-bot -f` |
+| Файл журнала (на маленьком Pi хранится дольше системного) | `tail -n 100 logs/bot.log` |
 | Перезапуск (после правки `.env` или персонажа) | `sudo systemctl restart family-pet-bot` |
 | Остановить / запустить | `sudo systemctl stop family-pet-bot` / `start` |
 | Резервная копия сейчас | `.venv/bin/python -m petbot backup` |

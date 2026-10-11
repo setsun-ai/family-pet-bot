@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from dataclasses import dataclass
 
 from .common import ServiceError, limit_text
 from .db import Database
@@ -26,6 +28,16 @@ UNCERTAIN, RATE_LIMITED, REJECTED = "uncertain", "rate_limited", "rejected"
 
 class DeliveryError(ServiceError):
     pass
+
+
+@dataclass(frozen=True)
+class PetMessage:
+    """The pet's latest message in a chat: the next words may answer it without a reply or its name (notice.py)."""
+    message_id: int
+    kind: str
+    at: float  # time.monotonic()
+    question: bool
+    to_user: int | None = None  # a conversation answer: only this person's next words can answer it
 
 
 def typing_pause(text: str) -> float:
@@ -41,6 +53,7 @@ class Delivery:
         self.db, self.allowed_emoji, self.pauses = db, allowed_emoji, pauses
         self.last_error: str | None = None
         self.context = None  # ChatContext (CHAT_CONTEXT): what the pet said becomes part of the conversation
+        self.last_sent: dict[int, PetMessage] = {}  # in memory only
 
     # --- platform hooks ---
     async def _post(self, chat_id: int, text: str, reply_to: int | None, silent: bool) -> int | None:
@@ -56,13 +69,17 @@ class Delivery:
 
     # --- shared logic ---
     async def send(self, chat_id: int, text: str, keys: list[tuple[str, str]], reply_to: int | None = None,
-                   *, sound: str = "first") -> bool:
-        """sound: "first" - only the first message of a burst notifies (default), "none" - all silent."""
+                   *, sound: str = "first", to_user: int | None = None) -> bool:
+        """
+        sound: "first" - only the first message of a burst notifies (default), "none" - all silent.
+        to_user: the person the pet is answering in a conversation (see PetMessage).
+        """
         parts = [limit_text(filter_emoji(part, self.allowed_emoji), self.max_units) for part in split_messages(text)]
         group = await self.db.reserve_delivery(chat_id, keys, MESSAGE_BREAK.join(parts))
         if group is None:
             return False
-        await self._send(group, chat_id, parts, reply_to, sound=sound, kind=keys[0][0] if keys else "")
+        await self._send(group, chat_id, parts, reply_to, sound=sound, kind=keys[0][0] if keys else "",
+                         to_user=to_user)
         return True
 
     async def _typing(self, chat_id: int, text: str) -> None:
@@ -72,7 +89,7 @@ class Delivery:
         await asyncio.sleep(typing_pause(text))
 
     async def _send(self, group: str, chat_id: int, parts: list[str], reply_to: int | None = None,
-                    *, sound: str = "first", kind: str = "") -> None:
+                    *, sound: str = "first", kind: str = "", to_user: int | None = None) -> None:
         sent_any, last_id, ids = False, None, []
         for index, part in enumerate(parts):
             try:
@@ -108,6 +125,8 @@ class Delivery:
         # Never retry if the success acknowledgement cannot be saved locally.
         await self.db.finish_delivery(group, "sent", message_id=last_id)
         self.last_error = None
+        if last_id is not None:
+            self.last_sent[chat_id] = PetMessage(last_id, kind, time.monotonic(), "?" in parts[-1], to_user)
         if self.context:
             self.context.add(chat_id, last_id, self.context.pet_name, " / ".join(parts), pet=True)
         if kind and ids:

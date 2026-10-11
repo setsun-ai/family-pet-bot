@@ -115,13 +115,17 @@ def names_pattern(names: tuple[str, ...]) -> re.Pattern | None:
     if not names:
         return None
 
+    def letters(part: str) -> str:
+        # Most people type "Сема" for "Сёма" (and the other way round): е and ё are the same letter here.
+        return "".join("[её]" if ch.lower() in "её" else re.escape(ch) for ch in part)
+
     def form(name: str) -> str:
         # Names ending in a vowel change it when declined (Мурка -> Мурке, Мурку):
         # match the stem + a 1-2 letter ending. Short names keep their vowel,
         # otherwise "Leo" would match "Lemon".
         if len(name) >= 4 and name[-1].lower() in "аяоеиыaeiouy":
-            return re.escape(name[:-1]) + r"\w{1,2}"
-        return re.escape(name) + r"\w{0,2}"
+            return letters(name[:-1]) + r"\w{1,2}"
+        return letters(name) + r"\w{0,2}"
 
     alternatives = "|".join(form(name) for name in sorted(names, key=len, reverse=True))
     return re.compile(r"(?<!\w)(?:" + alternatives + r")(?!\w)", re.IGNORECASE)

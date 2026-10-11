@@ -67,6 +67,12 @@ class TestSettings:
         s = Settings.load(env(tmp_path, f"BOT_TOKEN={TOKEN}\nANTHROPIC_API_KEY={KEY}\n"))
         assert (s.praise_weekday, s.praise_hour, s.praise_until_hour) == (5, 12, None)  # unchanged default
 
+    def test_log_file_and_link_preview(self, tmp_path):
+        s = Settings.load(env(tmp_path, f"BOT_TOKEN={TOKEN}\nANTHROPIC_API_KEY={KEY}\n"))
+        assert s.log_file is not None and s.log_file.parts[-2:] == ("logs", "bot.log") and s.link_preview
+        s = Settings.load(env(tmp_path, f"BOT_TOKEN={TOKEN}\nANTHROPIC_API_KEY={KEY}\nLOG_FILE=\nLINK_PREVIEW=false\n"))
+        assert s.log_file is None and not s.link_preview
+
     def test_secrets_are_not_in_repr(self, tmp_path):
         s = Settings.load(env(tmp_path, f"BOT_TOKEN={TOKEN}\nANTHROPIC_API_KEY={KEY}\n"))
         assert TOKEN not in repr(s) and KEY not in repr(s)
@@ -83,6 +89,12 @@ class TestWakeWords:
         anna = names_pattern(("Anna", "Leo"))
         assert anna.search("for Anna") and anna.search("Anne?") and not anna.search("annual report")
         assert anna.search("Leo!") and not anna.search("lemon")
+
+    def test_ye_and_yo_are_the_same_letter(self):
+        names = names_pattern(("Сёма", "Федор"))
+        assert names.search("Сема, иди сюда") and names.search("СЁМУ покормили")
+        assert names.search("где Фёдор?") and names.search("у Фёдора")
+        assert not names.search("семафор")
 
     def test_addressed(self):
         names = names_pattern(("Whiskers",))

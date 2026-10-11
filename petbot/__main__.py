@@ -45,7 +45,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from .app import run, setup_logging
 
-    setup_logging(settings, args.log_file)
+    setup_logging(settings, args.log_file or settings.log_file)
     if args.command == "backup":
         from .backup import backup
         print(backup(settings.database_path))

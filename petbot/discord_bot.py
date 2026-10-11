@@ -159,7 +159,8 @@ async def handle_message(app: DiscordApp, message: discord.Message) -> None:
     if media and not is_private and app.noticer and not (app.names and app.names.search(text)) and \
             me not in message.mentions and await app.access.allowed(user.id, chat_id, GROUP):
         await remember_line(app, message, ("[media] " + text).strip())
-        await app.noticer.notice(app, chat_id, message.id, user.id, text, message.add_reaction, media=True)
+        await app.noticer.notice(app, chat_id, message.id, user.id, text, message.add_reaction, media=True,
+                                 replying_to_someone=message.reference is not None)
         return
     if not text:
         return
@@ -183,7 +184,8 @@ async def handle_message(app: DiscordApp, message: discord.Message) -> None:
         await remember_line(app, message, text, addressed=to_pet, reply_to=replied.id if replied else None)
     if not is_private and not to_pet:
         if app.noticer:
-            await app.noticer.notice(app, chat_id, message.id, user.id, text, message.add_reaction)
+            await app.noticer.notice(app, chat_id, message.id, user.id, text, message.add_reaction,
+                                     replying_to_someone=replied is not None)
         return
     if to_me:
         await app.db.add_feedback(chat_id, replied.id, user.id, "↩")
@@ -210,7 +212,7 @@ async def handle_message(app: DiscordApp, message: discord.Message) -> None:
         async with message.channel.typing():
             answer = await app.ai.chat(history, text, display_name, reply_context=replied.content if to_me else None,
                                        verified_name=nickname is not None, chat_id=chat_id, chat_log=chat_log)
-        if await app.delivery.send(chat_id, answer, [("dialog", str(message.id))], message.id):
+        if await app.delivery.send(chat_id, answer, [("dialog", str(message.id))], message.id, to_user=user.id):
             await app.db.save_exchange(chat_id, f"{display_name[:100]}: {text}", answer, s.history_keep)
 
 

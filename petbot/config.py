@@ -45,6 +45,7 @@ class Settings:
     persona_emoji: str = ""
     timezone: str = "UTC"
     database_path: Path = ROOT / "data" / "bot.sqlite3"
+    log_file: Path | None = None  # also write the log here (rotated at 1 MB); None = only the console / journal
     notice_seconds: int = 8
     # news
     news_enabled: bool = True
@@ -85,6 +86,7 @@ class Settings:
     # the pet's inner life
     mood_enabled: bool = True
     sentiment_enabled: bool = False  # cheer achievements / react to bad news, by a local dictionary
+    link_preview: bool = True  # with sentiment: read the title and description of shared links (no AI)
     memory_enabled: bool = False  # remember short facts from conversations addressed to the pet
     memory_days: int = 60
     spontaneous_per_week: float = 0  # speak up on its own, on average this many times a week
@@ -234,6 +236,7 @@ class Settings:
             language=language, persona_file=persona, bot_names=items("BOT_NAMES"),
             persona_emoji="".join(text("PERSONA_EMOJI").split()),
             timezone=tz, database_path=path("DATABASE_PATH", "data/bot.sqlite3"),
+            log_file=path("LOG_FILE", "logs/bot.log") if text("LOG_FILE", "logs/bot.log") else None,
             notice_seconds=number("NOTICE_SECONDS", 8, 0, 3600),
             news_enabled=flag("NEWS_ENABLED", True), news_feeds=feeds, news_mode=news_mode,
             news_hour=number("NEWS_HOUR", 11, 0, 23), news_minute=number("NEWS_MINUTE", 0, 0, 59),
@@ -254,6 +257,7 @@ class Settings:
             praise_weekday=praise_weekday, praise_hour=praise_hour, praise_until_hour=praise_until,
             birthday_hour=number("BIRTHDAY_HOUR", 9, 0, 23), reactions_file=reactions_file, pet_birthday=pet_birthday,
             mood_enabled=flag("MOOD_ENABLED", True), sentiment_enabled=flag("SENTIMENT_ENABLED", False),
+            link_preview=flag("LINK_PREVIEW", True),
             memory_enabled=flag("MEMORY_ENABLED", False), memory_days=number("MEMORY_DAYS", 60, 1, 365),
             spontaneous_per_week=number("SPONTANEOUS_PER_WEEK", 0, 0, 7),
             chime_in_per_day=number("CHIME_IN_PER_DAY", 0, 0, 10),

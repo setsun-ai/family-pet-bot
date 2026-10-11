@@ -124,6 +124,7 @@ async def handle(message: Message, app: App) -> None:
         return
     # Don't spend money on messages queued while the bot was offline.
     if (datetime.now(UTC) - message.date).total_seconds() > 300:
+        log.info("Skipped a message older than 5 minutes (the bot was offline or lagging)")
         return
     if not message.text:
         if message.photo or message.animation or message.video or message.sticker:
@@ -139,7 +140,7 @@ async def handle(message: Message, app: App) -> None:
     if not app.limiter.allow(f"flood:{user.id}", 20):
         return
     if allowed and not is_private:
-        app.scheduler.note_activity(message.chat.id, text=text)
+        app.scheduler.note_activity(message.chat.id, text=text, forwarded=forwarded_from(message) is not None)
 
     # --- available to anyone (needed before access is granted) ---
     if command == "start" and args.startswith("claim_"):
@@ -230,7 +231,8 @@ async def handle(message: Message, app: App) -> None:
     if not to_pet:
         if app.noticer and not command:
             await app.noticer.notice(app, message.chat.id, message.message_id, user.id, text,
-                                     lambda emoji: message.react([ReactionTypeEmoji(emoji=emoji)]))
+                                     lambda emoji: message.react([ReactionTypeEmoji(emoji=emoji)]),
+                                     replying_to_someone=reply_author is not None)
         return
     if reply_author and reply_author.id == app.me.id:  # a reply to the pet's message counts for /stats
         await app.db.add_feedback(message.chat.id, message.reply_to_message.message_id, user.id, "↩")
@@ -242,6 +244,7 @@ async def handle(message: Message, app: App) -> None:
         if await app.news.from_stock(message.chat.id):
             return
     if not app.limiter.allow(f"ai:{user.id}", s.user_requests_per_minute):
+        log.info("No answer: too many requests from one person in a minute")
         await reply(message, t("too_many"), app)
         return
     async with app.locks.hold(message.chat.id):
@@ -263,9 +266,11 @@ async def handle(message: Message, app: App) -> None:
             chat_log = app.context.render(app.context.recent(message.chat.id), skip=message.message_id) or None
         answer = await app.ai.chat(history, text, display_name, reply_context=context,
                                    verified_name=nickname is not None, chat_id=message.chat.id, chat_log=chat_log)
-        sent = await app.delivery.send(message.chat.id, answer, [("dialog", str(message.message_id))], message.message_id)
+        sent = await app.delivery.send(message.chat.id, answer, [("dialog", str(message.message_id))], message.message_id,
+                                       to_user=user.id)
         if sent:
             await app.db.save_exchange(message.chat.id, f"{display_name[:100]}: {text}", answer, s.history_keep)
+        log.info("Answered a message addressed to the pet" if sent else "Answer already sent")
 
 
 def forwarded_from(message: Message) -> str | None:
@@ -311,10 +316,12 @@ async def notice_media(message: Message, app: App) -> None:
             not app.limiter.allow(f"flood:{user.id}", 20):
         return
     caption = (message.caption or "").strip()
-    app.scheduler.note_activity(message.chat.id, text=caption)
+    app.scheduler.note_activity(message.chat.id, text=caption, forwarded=forwarded_from(message) is not None)
     await remember_line(message, app, f"{media_label(message)} {caption}".strip())
+    replied = message.reply_to_message.from_user if message.reply_to_message else None
     await app.noticer.notice(app, message.chat.id, message.message_id, user.id, caption,
-                             lambda emoji: message.react([ReactionTypeEmoji(emoji=emoji)]), media=True)
+                             lambda emoji: message.react([ReactionTypeEmoji(emoji=emoji)]), media=True,
+                             replying_to_someone=replied is not None and replied.id != app.me.id)
 
 
 async def reaction_update(update: MessageReactionUpdated, app: App) -> None:

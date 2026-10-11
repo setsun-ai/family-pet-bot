@@ -50,7 +50,11 @@ WORRY_WORDS = frozenset("""
 прилет прилететь дрон шахед обстрел обстрелять тревога сирена ракета ракетный взрыв взрываться бомбить бомбежка
 укрытие бомбоубежище подвал атака атаковать
 """.split())
-RELIEF_WORDS = frozenset("отбой".split())  # "отбой тревоги" is the end of the alarm, not a new one
+# The same in Ukrainian (news is often forwarded in Ukrainian): pymorphy3 knows only Russian, so word forms.
+UA_WORRY = re.compile(r"(?<!\w)(?:обстріл\w*|тривог[аиуоіою]*|укритт\w*|вибух\w*|прил[іе]т\w*|прильот\w*|"
+                      r"шахед\w*|ракет(?:а|и|у|ою|і|ам|ами|ах|н[аеиіоу]\w*)?|атак(?:а|и|у|ою|ам|ами|ах|ував\w*|ують|ує)?|"
+                      r"бомбардуван\w*|сирен[аиуоюі]*)(?!\w)", re.I)
+RELIEF_WORDS = frozenset("отбой відбій".split())  # "отбой тревоги" is the end of the alarm, not a new one
 NEGATIONS = frozenset({"не", "ни"})  # "нет, я сдала!" is not a negated achievement
 HAPPY_EMOJI = set("🎉🥳🏆💪🔥🤩🙌✨")
 SAD_EMOJI = set("😢😭💔😞😔😿🤒🤕")
@@ -123,7 +127,8 @@ class Reader:
             return None
         worry = sum(1 for word in words if {lemma.replace("ё", "е") for lemma, _, _ in _forms(word)} & WORRY_WORDS
                     or (_morph() is None and _stem_hit(word, WORRY_WORDS)))
-        if worry or re.search(r"\b(?:air[- ]raid|drones?|shelling|missiles?|sirens?)\b", text, re.I):
+        if worry or UA_WORRY.search(text) or re.search(r"\b(?:air[- ]raid|drones?|shelling|missiles?|sirens?)\b",
+                                                        text, re.I):
             return Feeling("worry", self._target(words, author), max(worry, 1))
         if re.search(r"[а-я]", " ".join(words)):
             plan = any(w in PLAN_WORDS for w in words)

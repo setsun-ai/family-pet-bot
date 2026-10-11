@@ -81,6 +81,7 @@ Step by step: **[Getting started](docs/en/getting-started.md)** · **[Discord](d
 | Other group messages | never stored | never sent - unless `CHAT_CONTEXT=N` is on: then the last N (kept in memory only) go with answers, glances at the chat and the pet's own messages | in memory, at most 3 hours; gone after a restart or `/forget` |
 | Telegram/Discord user IDs, nicknames | access control, `/name` | no | until `/unname` or `/deny` |
 
+- **Links:** with `SENTIMENT_ENABLED` the bot opens public https pages shared in the family chat to read their title (`LINK_PREVIEW`, no AI); the site sees an ordinary visit.
 - **Logs:** never contain message content, prompts or secrets. Error lines name only the exception type, and tokens and API keys are redacted, even inside library tracebacks (`tests/test_log_privacy.py`).
 - **The database file:** created with permissions `0600` (and `umask 077`). On a shared machine, check it with `ls -l data/`, and `chmod 600 data/*.sqlite3` if you copied it from elsewhere.
 - **Full details and deletion steps:** [PRIVACY.md](PRIVACY.md).

@@ -105,9 +105,9 @@ class ReactionHandling(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.h.db.history(FAMILY), [])  # nothing stored
 
     async def test_no_reaction_when_addressed_private_or_unmatched(self):
+        await handle(self.h.message("hello all", chat=FAMILY, mid=10), self.h.app)
         await handle(self.h.message("Whiskers, gym?", chat=FAMILY, mid=8), self.h.app)  # gets an answer instead
         await handle(self.h.message("gym", chat=OWNER, mid=9), self.h.app)  # private chat: a normal reply
-        await handle(self.h.message("hello all", chat=FAMILY, mid=10), self.h.app)
         self.assertEqual(self.reactions(), [])
 
     async def test_other_groups_get_no_reactions(self):

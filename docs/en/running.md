@@ -58,6 +58,7 @@ Headless tip: open the link on your phone, or send `/claim CODE` to the bot in T
 | What | Command |
 |---|---|
 | Live log | `journalctl -u family-pet-bot -f` |
+| Log file (kept longer than the journal on a small Pi) | `tail -n 100 logs/bot.log` |
 | Restart (after editing `.env` or the persona) | `sudo systemctl restart family-pet-bot` |
 | Stop / start | `sudo systemctl stop family-pet-bot` / `start` |
 | Backup now | `.venv/bin/python -m petbot backup` |

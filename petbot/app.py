@@ -43,18 +43,21 @@ def setup_logging(settings: Settings, log_file: str | None = None) -> None:
         handler.setFormatter(formatter)
     logging.basicConfig(level=logging.INFO, handlers=handlers or [logging.NullHandler()], force=True)
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("aiogram.event").setLevel(logging.WARNING)  # "Update id=... is handled" for every message
     logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 def make_noticer(settings: Settings, family, platform: str):
     """Reactions and cheers for messages nobody addressed to the pet, or None when both are off."""
+    from .linkpeek import peek
     from .notice import Noticer
     from .reactions import load_reactions
     from .sentiment import Reader
 
     rules = load_reactions(settings.reactions_file, platform)
     reader = Reader(tuple(m.name for m in family.members)) if settings.sentiment_enabled else None
-    return Noticer(reader, rules) if rules or reader or settings.chat_context else None
+    return Noticer(reader, rules, peek=peek if settings.link_preview else None) \
+        if rules or reader or settings.chat_context else None
 
 
 async def run(settings: Settings, check: bool = False) -> int:

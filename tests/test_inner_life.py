@@ -111,6 +111,11 @@ class MoodServiceTests(unittest.IsolatedAsyncioTestCase):
     ("У нас пока летают только реактивные дроны. Сегодня 5 прилётов", "Мама", "worry", None),
     ("опять тревога", "Папа", "worry", None),
     ("отбой тревоги", "Папа", None, None),
+    # forwarded Ukrainian news
+    ("Пишуть, що через атаки на енергетику світла не буде до вечора", "Мама", "worry", None),
+    ("Нічний обстріл, всі в укритті", "Папа", "worry", None),
+    ("відбій тривоги", "Папа", None, None),
+    ("купила нову ракетку для тенісу", "Аня", None, None),
     # the family's dark humour is not news
     ("Доехал и никого не задавил", "Саша", None, None),
     ("Шкаф вывозили, чуть не убились", "Мама", None, None),

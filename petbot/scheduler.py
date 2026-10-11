@@ -22,6 +22,7 @@ from .db import Database
 from .delivery import DeliveryService
 from .family import FamilyService, praise_due, week_key
 from .i18n import t
+from .linkpeek import LINK
 from .news import NewsService
 from .sports import Match, SportsService, Team
 
@@ -105,16 +106,27 @@ class Scheduler:
         self.spontaneous = None  # Spontaneous, set by the app when SPONTANEOUS_PER_WEEK > 0
         self.activity: dict[int, datetime] = {}  # chat -> when someone last wrote there (in memory only)
         self.match_talk: dict[int, datetime] = {}  # chat -> when someone last wrote about a match
+        self.hushed: dict[int, datetime] = {}  # chat -> the last link, forwarded post or bad news (in memory only)
         self.rng = random.Random()
         self.tasks: list[asyncio.Task] = []
         self.last_errors: dict[str, str] = {}
 
-    def note_activity(self, chat_id: int, when: datetime | None = None, text: str = "") -> None:
+    def note_activity(self, chat_id: int, when: datetime | None = None, text: str = "", forwarded: bool = False) -> None:
         when = when or datetime.now(self.settings.tz)
         self.activity[chat_id] = when
+        if forwarded or LINK.search(text):
+            self.hushed[chat_id] = when  # somebody shared news: not the moment for the pet's small talk
         names = "|".join(re.escape(team.name) for team in self.sports.teams)
         if text and (MATCH_TALK.search(text) or (names and re.search(names, text, re.I))):
             self.match_talk[chat_id] = when
+
+    def hush(self, chat_id: int, when: datetime | None = None) -> None:
+        """Bad news or an alarm in the chat: the pet doesn't start a conversation of its own for a while."""
+        self.hushed[chat_id] = when or datetime.now(self.settings.tz)
+
+    def note_match_talk(self, chat_id: int, when: datetime | None = None) -> None:
+        """Someone answered the pet's "watching?" in words the MATCH_TALK pattern doesn't know."""
+        self.match_talk[chat_id] = when or datetime.now(self.settings.tz)
 
     def start(self) -> None:
         if self.tasks:
@@ -152,7 +164,8 @@ class Scheduler:
 
     async def _recent_post(self, chat: int, now: datetime, minutes: int, kinds: tuple[str, ...] = POST_KINDS) -> bool:
         last = await self.db.last_delivery_at(chat, kinds)
-        return bool(last and now - last < timedelta(minutes=minutes))
+        # A post "from the future" (the clock went back) doesn't block everything until the clock catches up.
+        return bool(last and timedelta(0) <= now - last < timedelta(minutes=minutes))
 
     # --- news ---
     async def news_tick(self, now: datetime | None = None) -> None:
@@ -301,7 +314,7 @@ class Scheduler:
         chat = await self.db.family()
         if not chat or quiet_time(now, self.settings) or await self._recent_post(chat, now, 60):
             return
-        await self.spontaneous.tick(chat, now, self.activity.get(chat))
+        await self.spontaneous.tick(chat, now, self.activity.get(chat), self.hushed.get(chat))
 
     async def cleanup_tick(self) -> None:
         await self.db.cleanup(self.settings.history_days, self.settings.memory_days)

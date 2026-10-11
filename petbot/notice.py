@@ -15,6 +15,16 @@ What the pet does with a family message nobody addressed to it - locally, withou
    sees the recent messages and decides where an emoji fits and whether the pet has
    something to say (at most CHIME_IN_PER_DAY lines a day; no quips about air raids).
 
+5. Answers to the pet without a reply or its name ("Канешн" after "смотрим?", "Отстань"
+   after it teased someone): one of the first two messages right after the pet's own message
+   (5 minutes, 15 after a question) gets one emoji picked here - 👍 for "yes", 😇 for
+   grumbling, 😁 for laughter, ❤ otherwise. No AI.
+
+A link with nothing in its text (LINK_PREVIEW, linkpeek.py): the pet reads the page's title and
+description with the same dictionary - only for bad news and alarms, never a cheer.
+Bad news, a link or a forwarded post also keeps the pet from starting a conversation of its own
+for a while (spontaneous.py).
+
 Nothing is stored. Without CHAT_CONTEXT the messages themselves are never sent to the AI. Telegram and
 Discord pass a `react(emoji)` callback; the cheer goes through the normal delivery.
 """
@@ -26,13 +36,15 @@ import random
 import re
 import time
 from collections import deque
+from dataclasses import replace
 from datetime import datetime, timedelta
 
 from .common import ServiceError
+from .linkpeek import first_link
 from .phrases import cheer
 from .reactions import Reactions
 from .scheduler import quiet_time
-from .sentiment import LAUGHING, Reader
+from .sentiment import LAUGHING, Feeling, Reader
 
 log = logging.getLogger(__name__)
 
@@ -47,13 +59,26 @@ GLANCE_BURST = 10  # ...or this many: look right away, without waiting for a pau
 GLANCE_GAP = 15 * 60  # seconds between glances
 GLANCE_PER_DAY = 20  # AI calls a day for glances
 CHIME_GAP = 3600  # seconds between lines the pet says on its own after a glance
+ANSWER_WINDOW = 5 * 60  # seconds after the pet's message when the next words are probably meant for it
+QUESTION_WINDOW = 15 * 60  # ...after a question ("смотрим?")
+ANSWER_MESSAGES = 2  # only the first messages after the pet's one
+PEEKS_PER_HOUR = 30  # pages opened for LINK_PREVIEW
+ANNOYED = re.compile(r"(?<!\w)(?:не\s+беси\w*|бесишь|бесит|отстань|отвали|отвянь|хватит|замолчи|заткнись|надоел\w*|"
+                     r"достал\w*|кыш|брысь|відчепись|stop it|shut up|go away)(?!\w)", re.I)
+DECLINE = re.compile(r"(?<!\w)(?:нет|неа|не\s+(?:буду|смогу|могу|хочу|успею)|ні|no|nope)(?!\w)", re.I)
+AGREE = re.compile(r"(?<!\w)(?:да+|ага+|угу+|конечно|канеш\w*|естествен+о|есес\w*|ессес\w*|го+|давай\w*|смотр\w*|"
+                   r"гляну|буду|ок|окей|ok|okay|yes|yep|sure|звісно|авжеж|дивимос\w*|дивлюс\w*)(?!\w)|"
+                   r"(?:^|\s)\+(?:\s|$)|👍", re.I)
 
 
 class Noticer:
     def __init__(self, reader: Reader | None = None, reactions: Reactions | None = None, *,
                  cheer_minutes: float = 10, person_minutes: float = 180, sad_minutes: float = 5, delay: tuple[float, float] = (2.0, 10.0),
-                 rng: random.Random | None = None, clock=time.monotonic, glance_pause: float = 75):
+                 rng: random.Random | None = None, clock=time.monotonic, glance_pause: float = 75, peek=None):
         self.reader, self.reactions = reader, reactions
+        self.peek = peek  # LINK_PREVIEW: async url -> the page's title and description, or None
+        self.peeks: list[float] = []
+        self.after_pet: dict[int, tuple[int, int, bool]] = {}  # chat -> (pet message, messages since, answered)
         self.cheer_cooldown, self.sad_cooldown = cheer_minutes * 60, sad_minutes * 60
         self.person_cooldown = person_minutes * 60  # everyone gets their own cheer, not "first come, first served"
         self.delay_range, self.rng, self.clock = delay, rng or random.Random(), clock
@@ -77,17 +102,27 @@ class Noticer:
         return True
 
     async def notice(self, app, chat_id: int, message_id: int, user_id: int, text: str, react,
-                     media: bool = False) -> str | None:
+                     media: bool = False, replying_to_someone: bool = False) -> str | None:
         """
         Returns what it did ("cheer", "react", "chime" or None), for tests and logs.
         media=True: a picture, GIF, video or sticker; `text` is its caption (may be empty).
+        replying_to_someone=True: a reply to another family member, so not an answer to the pet.
         """
         if chat_id != await app.db.family():
             return None
+        answer = self._answer_to_pet(app, chat_id, user_id, replying_to_someone)
         author = await app.db.family_name(user_id)
         mood = await app.mood.current() if app.mood else None
         feeling = self.reader.read(text, author) if self.reader and text else None
+        if feeling is None and self.reader and self.peek and (link := first_link(text)):
+            feeling = await self._read_link(link)
+        if feeling and feeling.kind in ("sad", "worry") and getattr(app, "scheduler", None):
+            app.scheduler.hush(chat_id)
         did = await self._act(app, chat_id, message_id, text, author, mood, feeling, react, media)
+        if answer:
+            await self._answered(app, chat_id, user_id, answer)
+            if did is None:
+                did = await self._react(react, self._answer_emoji(text, mood), "answer to the pet")
         vibe = self._vibe(text, feeling)
         self.recent.setdefault(chat_id, deque(maxlen=20)).append((self.clock(), user_id, vibe))
         context = getattr(app, "context", None)
@@ -99,6 +134,68 @@ class Noticer:
         if did != "cheer" and await self._chime_in(app, chat_id, mood):
             return "chime"
         return did
+
+    # --- answers to the pet without a reply or its name ---
+
+    def _answer_to_pet(self, app, chat_id: int, user_id: int, replying_to_someone: bool):
+        """The pet's message this one probably answers (delivery.PetMessage), or None. Once per pet message."""
+        last = getattr(app.delivery, "last_sent", {}).get(chat_id)
+        if last is None:
+            return None
+        pet_id, count, answered = self.after_pet.get(chat_id, (None, 0, False))
+        if pet_id != last.message_id:
+            count, answered = 0, False
+        count += 1
+        window = QUESTION_WINDOW if last.question else ANSWER_WINDOW
+        if answered or replying_to_someone or count > ANSWER_MESSAGES or time.monotonic() - last.at > window or \
+                last.to_user not in (None, user_id):  # the pet was talking to someone else
+            self.after_pet[chat_id] = (last.message_id, count, answered)
+            return None
+        self.after_pet[chat_id] = (last.message_id, count, True)
+        return last
+
+    async def _answered(self, app, chat_id: int, user_id: int, answer) -> None:
+        if answer.kind == "sports-kickoff" and getattr(app, "scheduler", None):
+            app.scheduler.note_match_talk(chat_id)  # "Канешн" means "watching", whatever the words
+        try:  # counts for /stats like a reply
+            await app.db.add_feedback(chat_id, answer.message_id, user_id, "↩")
+        except Exception as error:
+            log.warning("Could not record an answer to the pet (%s)", type(error).__name__)
+
+    def _answer_emoji(self, text: str, mood) -> str:
+        if ANNOYED.search(text):
+            choices = ("😇", "🙈")  # an innocent cat
+        elif LAUGHING.search(text):
+            choices = ("😁", "🤣")
+        elif DECLINE.search(text):
+            choices = ("😢", "🤷")
+        elif AGREE.search(text):
+            choices = ("👍", "❤")
+        else:
+            choices = ("❤", "🤗")
+        emoji = self.rng.choice(choices)
+        return mood.swap.get(emoji, emoji) if mood else emoji
+
+    # --- links (LINK_PREVIEW) ---
+
+    async def _read_link(self, link: str) -> Feeling | None:
+        """Bad news or an alarm behind a link; good news there is someone else's, not a family success."""
+        now = self.clock()
+        self.peeks = [t for t in self.peeks if now - t < 3600]
+        if len(self.peeks) >= PEEKS_PER_HOUR:
+            return None
+        self.peeks.append(now)
+        try:
+            page = await self.peek(link)
+        except Exception as error:
+            log.info("Link preview failed (%s)", type(error).__name__)
+            return None
+        feeling = self.reader.read(page.replace("?", ".")) if page else None  # headlines ask rhetorical questions
+        if feeling and (feeling.kind == "worry" or (feeling.kind == "sad" and feeling.strength >= 2)):
+            log.info("Link preview: %s", feeling.kind)
+            return replace(feeling, target=None)
+        log.info("Link preview: %s", "nothing to react to" if page else "unavailable")
+        return None
 
     # --- glancing at the chat (CHAT_CONTEXT) ---
 
@@ -150,7 +247,7 @@ class Noticer:
             if line is None or line.react is None or line.addressed:
                 continue
             react, line.react = line.react, None
-            did = await self._react(react, emoji) or did
+            did = await self._react(react, emoji, "glance") or did
         if allow_say and result.say:
             target = by_number.get(result.reply_to)
             if await app.delivery.send(chat_id, result.say, [("chime", f"{local:%Y-%m-%d %H:%M}")],
@@ -235,28 +332,30 @@ class Noticer:
                 except ServiceError as error:  # nobody asked for it: never answer with an error notice
                     log.info("Cheer not sent (%s)", error)
                     return None
+                log.info("Cheer sent")
                 return "cheer"
             emoji = self.rng.choice(PROUD)
-            return await self._react(react, mood.swap.get(emoji, emoji) if mood else emoji)
+            return await self._react(react, mood.swap.get(emoji, emoji) if mood else emoji, "achievement")
         if feeling and feeling.kind == "worry":
             if self._allow("worry", chat_id, self.sad_cooldown):
-                return await self._react(react, self.rng.choice(WORRY))  # never swapped by a mood
+                return await self._react(react, self.rng.choice(WORRY), "alarm")  # never swapped by a mood
             return None
         if feeling and feeling.kind == "sad":
             if self._allow("sad", chat_id, self.sad_cooldown):
-                return await self._react(react, self.rng.choice(SAD))  # sad news is never "swapped" by a mood
+                return await self._react(react, self.rng.choice(SAD), "bad news")  # never "swapped" by a mood
             return None
         if self.reactions:
             emoji = self.reactions.pick(chat_id, text, author, mood, media)
             if emoji:
-                return await self._react(react, emoji)
+                return await self._react(react, emoji, "rule")
         return None
 
-    async def _react(self, react, emoji: str) -> str | None:
+    async def _react(self, react, emoji: str, why: str = "") -> str | None:
         await asyncio.sleep(self.rng.uniform(*self.delay_range))  # a cat needs a moment to notice
         try:
             await react(emoji)
         except Exception as error:  # e.g. the group allows only some reactions
             log.info("Reaction not set (%s)", type(error).__name__)
             return None
+        log.info("Reaction %s (%s)", emoji, why)  # the emoji and the reason, never the message
         return "react"
