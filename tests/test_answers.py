@@ -14,6 +14,7 @@ from aiogram.methods import SetMessageReaction
 from petbot import linkpeek
 from petbot.handlers import handle
 from petbot.notice import Noticer
+from petbot.reactions import parse_rules
 from petbot.sentiment import Reader
 from petbot.spontaneous import Spontaneous
 from tests.support import FAMILY, Harness
@@ -202,3 +203,74 @@ class QuietAfterNews(unittest.IsolatedAsyncioTestCase):
         await self.run_day(text="ну что, обедаем?")
         [message] = self.h.session.sent
         self.assertEqual(message.text, "Мрр, какой сонный день")
+
+
+# --- edited messages -----------------------------------------------------------------------------
+
+class EditedMessages(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.h = await Harness().open()
+        rules = parse_rules({"cooldown_minutes": 0, "rules": [{"any": ["хлеб"], "react": ["👀"]}]})
+        self.h.app.noticer = Noticer(None, rules, delay=(0, 0), rng=random.Random(1))
+
+    async def asyncTearDown(self):
+        await self.h.close()
+
+    def reactions(self):
+        return [r for r in self.h.session.requests if isinstance(r, SetMessageReaction)]
+
+    def edit(self, text, mid, minutes_ago=0):
+        return self.h.message(text, uid=ANNA, chat=FAMILY, mid=mid, edit_date=int(time.time()) - minutes_ago * 60)
+
+    async def test_adding_the_name_in_an_edit_gets_one_answer(self):
+        await handle(self.h.message("кто купил хлеб", uid=ANNA, chat=FAMILY, mid=90), self.h.app)
+        self.assertEqual(len(self.reactions()), 1)
+        await handle(self.edit("Whiskers, кто купил хлеб", 90), self.h.app, edited=True)
+        await handle(self.edit("Whiskers, кто купил хлеб?", 90), self.h.app, edited=True)  # edited once more
+        self.assertEqual(self.h.ai.chat.call_count, 1)
+        self.assertEqual(self.h.session.sent[0].reply_parameters.message_id, 90)
+        self.assertEqual(len(self.reactions()), 1)  # no second emoji for the edit
+
+    async def test_edits_that_change_nothing_for_the_pet(self):
+        await handle(self.edit("кто купил хлеб!!", 91), self.h.app, edited=True)  # still not addressed
+        await handle(self.edit("Whiskers, привет", 92, minutes_ago=10), self.h.app, edited=True)  # too late
+        await handle(self.edit("/news", 93), self.h.app, edited=True)  # commands are not re-run
+        self.h.ai.chat.assert_not_called()
+        self.assertEqual((self.reactions(), self.h.session.sent), ([], []))
+
+
+# --- how welcome the pet's own messages are ------------------------------------------------------
+
+class Welcome(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.h = await Harness().open(spontaneous_per_week=7)
+        self.pet = Spontaneous(self.h.settings, self.h.db, self.h.ai, self.h.delivery, rng=random.Random(1))
+
+    async def asyncTearDown(self):
+        await self.h.close()
+
+    async def posts(self, answered):
+        ids = list(range(500, 500 + len(answered)))
+        await self.h.db.remember_sent(FAMILY, ids, "spontaneous")
+        for mid, yes in zip(ids, answered, strict=True):
+            if yes:
+                await self.h.db.add_feedback(FAMILY, mid, ANNA, "😁")
+
+    async def test_too_early_to_tell(self):
+        await self.posts([False, False])
+        self.assertEqual(await self.pet.welcome(FAMILY), 1.0)
+
+    async def test_nobody_answers_so_it_speaks_up_less(self):
+        await self.posts([False, False, False])
+        self.assertAlmostEqual(await self.pet.welcome(FAMILY), 0.4)
+        self.pet.rng.random = lambda: 0.5  # would talk today with the full chance
+        plan = await self.pet._plan(datetime(2026, 10, 7, 9, 0, tzinfo=WARSAW), FAMILY)
+        self.assertFalse(plan["chatty"])
+
+    async def test_answers_bring_it_back(self):
+        await self.posts([False, True, False, True])
+        self.assertEqual(await self.pet.welcome(FAMILY), 1.0)
+
+    async def test_somewhere_in_between(self):
+        await self.posts([True, False, False, False])
+        self.assertAlmostEqual(await self.pet.welcome(FAMILY), 0.7)

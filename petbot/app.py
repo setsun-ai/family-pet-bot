@@ -123,7 +123,7 @@ async def run(settings: Settings, check: bool = False) -> int:
             scheduler.start()
             logging.info(t("console_started", username=me.username, tz=settings.timezone))
             try:
-                await dispatcher.start_polling(bot, allowed_updates=["message", "message_reaction"], tasks_concurrency_limit=32,
+                await dispatcher.start_polling(bot, allowed_updates=["message", "edited_message", "message_reaction"], tasks_concurrency_limit=32,
                                                close_bot_session=False)
             finally:
                 await scheduler.stop()

@@ -23,7 +23,7 @@ from . import __version__, updater
 from .ai import AIService
 from .common import ChatLocks, RateLimiter, ServiceError, addressed, asks_for_news, limit_text, names_pattern
 from .config import Settings
-from .context import ChatContext
+from .context import TEXT_LIMIT, ChatContext
 from .core import check_text, help_text, memory_text, mood_text, preview_text, stats_text, status_text  # noqa: F401
 from .db import Database
 from .delivery import DeliveryService
@@ -106,7 +106,11 @@ def split_command(text: str, username: str) -> tuple[str, str]:
     return cmd.lower(), args.strip()
 
 
-async def handle(message: Message, app: App) -> None:
+async def handle(message: Message, app: App, *, edited: bool = False) -> None:
+    """
+    edited=True: an edited message. It gets an answer only if the edit addressed the pet (someone
+    added its name) and it hasn't been answered yet; it never gets a second reaction.
+    """
     s = app.settings
     # Group -> supergroup upgrades change the chat id; follow it.
     if message.migrate_to_chat_id:
@@ -123,23 +127,24 @@ async def handle(message: Message, app: App) -> None:
     if message.chat.type not in {ChatType.PRIVATE, ChatType.GROUP, ChatType.SUPERGROUP}:
         return
     # Don't spend money on messages queued while the bot was offline.
-    if (datetime.now(UTC) - message.date).total_seconds() > 300:
+    written = datetime.fromtimestamp(message.edit_date, UTC) if edited and message.edit_date else message.date
+    if (datetime.now(UTC) - written).total_seconds() > 300:
         log.info("Skipped a message older than 5 minutes (the bot was offline or lagging)")
         return
     if not message.text:
-        if message.photo or message.animation or message.video or message.sticker:
+        if (message.photo or message.animation or message.video or message.sticker) and not edited:
             await notice_media(message, app)
         return
     text = message.text.strip()
     command, args = split_command(text, app.me.username or "")
-    if command == "__other_bot__":
+    if command == "__other_bot__" or (edited and command):
         return
     is_private = message.chat.type == ChatType.PRIVATE
     owner = await app.access.is_owner(user.id)
     allowed = await app.access.allowed(user.id, message.chat.id, message.chat.type)
     if not app.limiter.allow(f"flood:{user.id}", 20):
         return
-    if allowed and not is_private:
+    if allowed and not is_private and not edited:
         app.scheduler.note_activity(message.chat.id, text=text, forwarded=forwarded_from(message) is not None)
 
     # --- available to anyone (needed before access is granted) ---
@@ -226,6 +231,10 @@ async def handle(message: Message, app: App) -> None:
     reply_author = message.reply_to_message.from_user if message.reply_to_message else None
     to_pet = is_private or addressed(text, app.me.username or "", reply_author.id if reply_author else None,
                                      app.me.id, app.names)
+    if edited and (not to_pet or await app.db.has_delivery(message.chat.id, "dialog", str(message.message_id))):
+        return  # the edit changed nothing for the pet, or it has already answered
+    if edited:
+        log.info("A message was edited to address the pet")
     if not is_private:
         await remember_line(message, app, text, addressed=to_pet)
     if not to_pet:
@@ -302,6 +311,9 @@ async def remember_line(message: Message, app: App, text: str, *, addressed: boo
     source = forwarded_from(message)
     if source:
         text = f"[forwarded from {source}] {text}"
+    if line := app.context.find(message.chat.id, message.message_id):  # an edited message
+        line.text, line.addressed = " ".join(text.split())[:TEXT_LIMIT], addressed
+        return
     app.context.add(message.chat.id, message.message_id, author, text, user_id=user.id, addressed=addressed,
                     react=lambda emoji: message.react([ReactionTypeEmoji(emoji=emoji)]),
                     reply_to=message.reply_to_message.message_id if message.reply_to_message else None)
@@ -502,11 +514,18 @@ def make_router(app: App) -> Router:
 
     @router.message()
     async def dispatch(message: Message):
+        await guarded(message, edited=False)
+
+    @router.edited_message()
+    async def dispatch_edit(message: Message):
+        await guarded(message, edited=True)
+
+    async def guarded(message: Message, *, edited: bool):
         task = asyncio.current_task()
         if task is not None:
             app.active_tasks.add(task)
         try:
-            await handle(message, app)
+            await handle(message, app, edited=edited)
         except ServiceError as error:
             log.info("No answer: %s", error.key)  # group notices vanish after NOTICE_SECONDS: keep a trace
             try:

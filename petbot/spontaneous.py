@@ -15,6 +15,11 @@ One AI call, one short message.
 Never right after somebody shared a link or a forwarded post, or after bad news or an
 alarm (scheduler.hush): small talk right under news about a strike is the worst
 timing a cat can have. It waits HUSH, then tries again while the chat is alive.
+
+It also notices when nobody cares: if few of its last messages of its own got a reaction
+or an answer (the /stats data: replies, reactions, answers without a reply), it speaks up
+less often - down to 40 % of SPONTANEOUS_PER_WEEK - and back again once people respond.
+Telegram reports reactions only to group admins, so without admin rights only answers count.
 """
 from __future__ import annotations
 
@@ -29,6 +34,7 @@ log = logging.getLogger(__name__)
 
 ACTIVE = timedelta(minutes=15)
 HUSH = timedelta(minutes=45)
+LISTENED_DAYS, LISTENED_POSTS = 21, 6  # the pet's last messages of its own that tell how welcome they are
 
 
 class Spontaneous:
@@ -42,7 +48,19 @@ class Spontaneous:
         start, end = self.settings.quiet_end_hour + 1, self.settings.quiet_start_hour - 1
         return (start, end) if start < end else (10, 21)
 
-    async def _plan(self, local: datetime) -> dict:
+    async def welcome(self, chat: int) -> float:
+        """1.0 when the family answers the pet's own messages, down to 0.4 when nobody does."""
+        counts = await self.db.post_feedback(chat, "spontaneous", LISTENED_DAYS, LISTENED_POSTS)
+        if len(counts) < 3:
+            return 1.0  # too early to tell
+        answered = sum(1 for count in counts if count)
+        factor = 0.4 + 0.6 * min(1.0, answered / len(counts) / 0.5)
+        if factor < 1:
+            log.info("Spontaneous messages: %d of the last %d got a reaction or an answer; speaking up x%.1f",
+                     answered, len(counts), factor)
+        return factor
+
+    async def _plan(self, local: datetime, chat: int) -> dict:
         raw = await self.db.get("spontaneous_plan")
         plan = json.loads(raw) if raw else {}
         day = local.date().isoformat()
@@ -50,8 +68,8 @@ class Spontaneous:
             start, end = self._window()
             minute = self.rng.randrange(start * 60, end * 60)
             at = local.replace(hour=minute // 60, minute=minute % 60, second=0, microsecond=0)
-            plan = {"day": day, "chatty": self.rng.random() < self.settings.spontaneous_per_week / 7,
-                    "at": at.isoformat(), "done": False}
+            chance = self.settings.spontaneous_per_week / 7 * await self.welcome(chat)
+            plan = {"day": day, "chatty": self.rng.random() < chance, "at": at.isoformat(), "done": False}
             await self.db.set("spontaneous_plan", json.dumps(plan))
         return plan
 
@@ -59,7 +77,7 @@ class Spontaneous:
                    hushed: datetime | None = None) -> bool:
         """True if the pet said something. `hushed`: the last link, forwarded post or bad news in the chat."""
         local = now.astimezone(self.settings.tz)
-        plan = await self._plan(local)
+        plan = await self._plan(local, chat)
         if not plan["chatty"] or plan["done"] or local < datetime.fromisoformat(plan["at"]):
             return False
         if last_activity is None or now - last_activity > ACTIVE:

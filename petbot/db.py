@@ -241,6 +241,17 @@ class Database:
                 row = await cur.fetchone()
                 return datetime.fromisoformat(row[0]) if row else None
 
+    async def post_feedback(self, chat_id: int, kind: str, days: int, limit: int) -> list[int]:
+        """Reactions and replies under each of the pet's latest posts of this kind, newest first."""
+        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+        async with self.transaction() as db:
+            async with db.execute(
+                "SELECT COUNT(f.emoji) FROM sent_messages s LEFT JOIN feedback f "
+                "ON f.chat_id=s.chat_id AND f.message_id=s.message_id WHERE s.chat_id=? AND s.kind=? AND s.created_at>=? "
+                "GROUP BY s.message_id ORDER BY MAX(s.created_at) DESC, s.message_id DESC LIMIT ?",
+                (chat_id, kind, cutoff, limit)) as cur:
+                return [row[0] for row in await cur.fetchall()]
+
     async def feedback_stats(self, chat_id: int, days: int = 30) -> list[dict]:
         """Per kind of post: messages sent, reactions, replies and the most common emoji."""
         cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()

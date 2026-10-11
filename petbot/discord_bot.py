@@ -139,24 +139,30 @@ async def remember_line(app: DiscordApp, message: discord.Message, text: str, *,
                     react=message.add_reaction, reply_to=reply_to)
 
 
-async def handle_message(app: DiscordApp, message: discord.Message) -> None:
-    """A normal (non-slash) message: typed /claim in DMs, or conversation."""
+async def handle_message(app: DiscordApp, message: discord.Message, *, edited: bool = False) -> None:
+    """
+    A normal (non-slash) message: typed /claim in DMs, or conversation.
+    edited=True: answered only if the edit addressed the pet and it hasn't answered yet.
+    """
     s = app.settings
     me = app.client.user
     media = any((a.content_type or "").startswith(("image/", "video/")) for a in message.attachments) or \
         bool(message.stickers)
     if me is None or message.author.bot or message.webhook_id or not (message.content or media):
         return
-    if (datetime.now(UTC) - message.created_at).total_seconds() > 300:
+    written = (message.edited_at or message.created_at) if edited else message.created_at
+    if (datetime.now(UTC) - written).total_seconds() > 300:
         return
     user, chat_id = message.author, message.channel.id
     is_private = message.guild is None
     if not app.limiter.allow(f"flood:{user.id}", 20):
         return
     text = message.clean_content.strip()  # mentions become readable @names
-    if not is_private:
+    if not is_private and not edited:
         app.scheduler.note_activity(chat_id, text=text)
-    if media and not is_private and app.noticer and not (app.names and app.names.search(text)) and \
+    if edited and (not text or text.startswith("/") or re.fullmatch(r"/?claim\s+(\S+)", text, re.I)):
+        return
+    if media and not edited and not is_private and app.noticer and not (app.names and app.names.search(text)) and \
             me not in message.mentions and await app.access.allowed(user.id, chat_id, GROUP):
         await remember_line(app, message, ("[media] " + text).strip())
         await app.noticer.notice(app, chat_id, message.id, user.id, text, message.add_reaction, media=True,
@@ -180,6 +186,10 @@ async def handle_message(app: DiscordApp, message: discord.Message) -> None:
     replied = await _replied_message(message)
     to_me = replied is not None and replied.author.id == me.id
     to_pet = to_me or me in message.mentions or bool(app.names and app.names.search(text))
+    if edited and (not (to_pet or is_private) or await app.db.has_delivery(chat_id, "dialog", str(message.id))):
+        return  # the edit changed nothing for the pet, or it has already answered
+    if edited:
+        log.info("A message was edited to address the pet")
     if not is_private:
         await remember_line(app, message, text, addressed=to_pet, reply_to=replied.id if replied else None)
     if not is_private and not to_pet:
@@ -606,6 +616,21 @@ class PetClient(discord.Client):
         finally:
             if task is not None:
                 self.app.active_tasks.discard(task)
+
+    async def on_message_edit(self, before: discord.Message, after: discord.Message) -> None:
+        if before.content == after.content:
+            return  # an embed or a pin, not a new text
+        try:
+            await handle_message(self.app, after, edited=True)
+        except ServiceError as error:
+            try:
+                await after.channel.send("⚠️ " + str(error), allowed_mentions=NO_PINGS)
+            except discord.DiscordException:
+                log.warning("Could not deliver an error notice")
+        except discord.DiscordException as error:
+            log.warning("Discord rejected a response (%s)", type(error).__name__)
+        except Exception as error:
+            log.error("Handler failed (%s); message content and secrets are not logged", type(error).__name__)
 
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
         try:

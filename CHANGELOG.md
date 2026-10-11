@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.0 (2026-10)
+
+- **Edited messages.** Adding the pet's name to a message afterwards ("..., Whiskers?") now gets an answer, once, if the edit comes within 5 minutes. An edit never gets a second reaction, never re-runs a command and never answers twice. Telegram: the bot now also receives `edited_message` updates; Discord: `on_message_edit`.
+- **The pet notices when nobody cares.** If few of its last 6 messages of its own (`SPONTANEOUS_PER_WEEK`, last 3 weeks) got a reaction or an answer, it speaks up less often - down to 40 % - and back to normal once people respond again. Counted from the `/stats` data, locally. Telegram reports reactions only to group admins: without admin rights only answers count.
+
 ## 1.4.0 (2026-10)
 
 The pet decides locally when to react and when to keep quiet. No new AI calls.
