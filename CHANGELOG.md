@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.1 (2026-10)
+
+- **Fix: `/update` could never install a new version.** The selftest starts the downloaded code from `.update/new/` before switching to it, and that code looked for `.env`, the persona and the `*.local.json` files next to itself, where there are none: "BOT_TOKEN is missing", the old version kept running. Now code started from `.update/new/` reads the project's settings. The fix is in the new code, so `/update` from 1.2.1 and later installs this version. A new test runs the real selftest the same way.
+
 ## 1.6.0 (2026-10)
 
 What the pet says unasked no longer comes from the AI.

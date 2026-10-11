@@ -15,7 +15,18 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import dotenv_values
 
-ROOT = Path(__file__).resolve().parent.parent
+
+def project_root(package_parent: Path) -> Path:
+    """
+    The folder with .env, personas and data/. /update tests new code from <project>/.update/new/
+    before switching to it (updater.py): that code's settings are still the project's.
+    """
+    if package_parent.name == "new" and package_parent.parent.name == ".update":
+        return package_parent.parent.parent
+    return package_parent
+
+
+ROOT = project_root(Path(__file__).resolve().parent.parent)
 
 DEFAULT_FEEDS = (
     "https://www.goodnewsnetwork.org/category/news/feed/",

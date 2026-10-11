@@ -104,6 +104,34 @@ class UpdaterTests(unittest.TestCase):
         self.assertIsNone(updater.rollback())
 
 
+def test_the_real_selftest_finds_the_projects_settings(tmp_path):
+    """The selftest with the real code, from .update/new/ like /update runs it: .env and personas stay outside."""
+    import os
+    import shutil
+    import subprocess
+    import sys
+
+    from petbot.config import ROOT
+
+    project = tmp_path / "project"
+    new = project / ".update" / "new"
+    shutil.copytree(ROOT / "petbot", new / "petbot", ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(ROOT / "personas", project / "personas", ignore=shutil.ignore_patterns("*.local.md"))
+    clean = {k: v for k, v in os.environ.items() if not k.startswith(("BOT_", "ANTHROPIC", "OPENAI", "LOG_"))}
+
+    def selftest():
+        return subprocess.run([sys.executable, "-c", updater.SELFTEST, str(new)], cwd=project, capture_output=True,
+                              text=True, timeout=120, env=clean)
+
+    missing = selftest()  # no .env in the project yet: the new code must not look for one in .update/new
+    assert missing.returncode != 0 and "BOT_TOKEN" in missing.stdout + missing.stderr
+    (project / ".env").write_text("BOT_TOKEN=987654321:" + "A" * 35 + "\nANTHROPIC_API_KEY=sk-ant-test-key-1234567890\n"
+                                  "LOG_FILE=\n")
+    result = selftest()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"OK {__version__}" in result.stdout
+
+
 class UpdateCommandTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.h = await Harness().open()
