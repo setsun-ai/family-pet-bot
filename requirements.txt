@@ -25,13 +25,9 @@ anyio==4.15.1
     # via httpx
 attrs==26.1.0
     # via aiohttp
-audioop-lts==0.2.2 ; python_version >= "3.13"
-    # via
-    #   -r requirements.in
-    #   discord-py
 beautifulsoup4==4.15.0
     # via -r requirements.in
-certifi==2026.7.22
+certifi==2026.10.19
     # via
     #   aiogram
     #   httpcore
@@ -86,6 +82,8 @@ soupsieve==2.10
 typing-extensions==4.16.0
     # via
     #   aiogram
+    #   aiohttp
+    #   aiosignal
     #   anyio
     #   beautifulsoup4
     #   pydantic
