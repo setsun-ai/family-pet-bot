@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.2 (2026-11)
+
+- **Security updates of the libraries.** certifi 2026.10.23 (critical: it no longer trusts root certificates whose intermediate CA keys were compromised), aiohttp 3.14.5, filelock 4.2.7 and multidict 6.9.1 (several high and medium advisories), plus python-dotenv 1.2.4 and tzdata 2026.6. `/update` installs them by itself (it runs `pip install` when `requirements.txt` changes); ready-made wheels exist for the Raspberry Pi (aarch64 and armv7), nothing is compiled. No change in the bot's behaviour.
+- `requirements.in` now requires at least aiohttp 3.14.4 and filelock 4.2.1, the first versions without these advisories.
+
 ## 1.6.1 (2026-10)
 
 - **Fix: `/update` could never install a new version.** The selftest starts the downloaded code from `.update/new/` before switching to it, and that code looked for `.env`, the persona and the `*.local.json` files next to itself, where there are none: "BOT_TOKEN is missing", the old version kept running. Now code started from `.update/new/` reads the project's settings. The fix is in the new code, so `/update` from 1.2.1 and later installs this version. A new test runs the real selftest the same way.
