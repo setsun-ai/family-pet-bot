@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.7.0 (unreleased)
+## 1.7.0 (2026-11)
 
 - **🧩 The owner's menu of tiles.** In your private chat with the bot, `/menu` shows your commands as tiles - 📊 Status, 🔎 Check, 🎭 Mood, 🧠 Memory, 📈 Stats, 👥 People, 🏷 Nicknames, 📬 Deliveries, 👀 Preview ▸ (news, praise, birthday, every team) and 🛠 Bot ▸ (update, roll back, commands). A tile runs exactly the typed command and its answer comes below the menu; ↩️ Menu goes back from a sub-menu. Under **/** your private chat now has `/menu` plus the family's short list instead of 14 owner commands; everything still works when typed and `/help` lists it.
 - **Only you, only in private.** Anyone else who taps a tile - or you in the family group, where the status would show IDs - gets a pop-up instead. The family group's menu doesn't change.
