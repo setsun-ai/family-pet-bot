@@ -119,13 +119,13 @@ MESSAGES: dict[str, dict[str, str]] = {
                           "/privacy — what is stored and sent to the AI\n/help — this list",
                     "ru": "/forget — очистить память этого чата (в группе — только владелец)\n/id — ваш Telegram ID\n"
                           "/privacy — что хранится и что уходит в ИИ\n/help — эта памятка"},
-    "help_owner": {"en": "\nOwner:\n/setup_chat — choose the family group (send it inside the group)\n"
+    "help_owner": {"en": "\nOwner:\n/menu — your commands as tiles (private)\n/setup_chat — choose the family group (send it inside the group)\n"
                          "/status, /check — status and connection test (private)\n/allow ID, /deny ID — private access\n"
                          "/users — allowed people\n/who, /name Name, /unname — reply to a person: ID / set / remove nickname\n"
                          "/names — all nicknames\n/del — reply to my message: delete it\n"
                          "/deliveries, /retry_delivery ID confirm — sends with an unknown outcome\n"
                          "/update, /rollback — install the newest release / go back (private)",
-                   "ru": "\nВладельцу:\n/setup_chat — назначить семейную группу (отправить в группе)\n"
+                   "ru": "\nВладельцу:\n/menu — твои команды плитками (в личке)\n/setup_chat — назначить семейную группу (отправить в группе)\n"
                          "/status, /check — состояние и проверка подключений (в личке)\n/allow ID, /deny ID — доступ к личке\n"
                          "/users — разрешённые люди\n/who, /name Имя, /unname — Reply на человека: ID / задать / убрать имя\n"
                          "/names — все домашние имена\n/del — Reply на моё сообщение: удалить\n"
@@ -344,6 +344,29 @@ MESSAGES: dict[str, dict[str, str]] = {
 
     # --- Telegram command menu ---
     "cmd_help": {"en": "What I can do", "ru": "Памятка"},
+    "cmd_menu": {"en": "Owner's menu of tiles", "ru": "Меню владельца (плитки)"},
+    "hub_title": {"en": "🧩 Menu\nPick a tile. All commands: /help", "ru": "🧩 Меню\nВыбери плитку. Все команды: /help"},
+    "hub_bot_title": {"en": "🛠 Bot", "ru": "🛠 Бот"},
+    "hub_preview_title": {"en": "👀 Preview a post – only you see it, nothing goes to the family",
+                          "ru": "👀 Предпросмотр поста – видишь только ты, семье ничего не уходит"},
+    "menu_expired": {"en": "This menu is too old – send /menu.", "ru": "Это меню устарело – отправь /menu."},
+    "tile_menu": {"en": "↩️ Menu", "ru": "↩️ Меню"},
+    "tile_status": {"en": "📊 Status", "ru": "📊 Статус"},
+    "tile_check": {"en": "🔎 Check", "ru": "🔎 Проверка"},
+    "tile_mood": {"en": "🎭 Mood", "ru": "🎭 Настроение"},
+    "tile_memory": {"en": "🧠 Memory", "ru": "🧠 Память"},
+    "tile_stats": {"en": "📈 Stats", "ru": "📈 Статистика"},
+    "tile_users": {"en": "👥 People", "ru": "👥 Люди"},
+    "tile_names": {"en": "🏷 Nicknames", "ru": "🏷 Клички"},
+    "tile_deliveries": {"en": "📬 Deliveries", "ru": "📬 Доставки"},
+    "tile_preview": {"en": "👀 Preview ▸", "ru": "👀 Превью ▸"},
+    "tile_bot": {"en": "🛠 Bot ▸", "ru": "🛠 Бот ▸"},
+    "tile_update": {"en": "⬆️ Update", "ru": "⬆️ Обновить"},
+    "tile_rollback": {"en": "⏪ Roll back", "ru": "⏪ Откатить"},
+    "tile_help": {"en": "📖 Commands", "ru": "📖 Команды"},
+    "tile_news": {"en": "📰 News", "ru": "📰 Новость"},
+    "tile_praise": {"en": "🌟 Praise", "ru": "🌟 Похвала"},
+    "tile_birthday": {"en": "🎂 Birthday", "ru": "🎂 День рождения"},
     "cmd_news": {"en": "A good-news story", "ru": "Добрая новость"},
     "cmd_sports": {"en": "Our team's matches", "ru": "Матчи нашей команды"},
     "cmd_forget": {"en": "Clear this chat's memory", "ru": "Очистить память чата"},

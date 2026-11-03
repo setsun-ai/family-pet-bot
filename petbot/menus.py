@@ -2,7 +2,7 @@
 The "/" command menus in Telegram, one per audience:
 
 - everyone: the everyday commands (help, news, teams, forget...);
-- the owner's private chat with the bot: + all owner commands (status, preview...);
+- the owner's private chat with the bot: + /menu, the owner's commands as tiles (status, preview...);
 - the owner in the family group: + the nickname and setup commands.
 
 Family members never see admin commands they couldn't use anyway. Telegram
@@ -16,8 +16,11 @@ from .i18n import t
 
 log = logging.getLogger(__name__)
 
-OWNER_PRIVATE = ("status", "check", "preview", "mood", "memory", "stats", "names", "users", "allow", "deny", "deliveries",
-                 "retry_delivery", "update", "rollback")
+# The owner's tiles (/menu, private chat): group -> rows; a tile that is itself a group opens it. Two a row, so
+# they fit a phone in both languages. Typed commands still work (/help lists them, incl. those with an argument).
+OWNER_HUB = {"": [["status", "check"], ["mood", "memory"], ["stats", "users"], ["names", "deliveries"],
+                  ["preview", "bot"]],
+             "bot": [["update", "rollback"], ["help"]]}
 OWNER_GROUP = ("who", "name", "unname", "names", "setup_chat")
 
 
@@ -34,7 +37,27 @@ def bot_commands(settings, teams=()) -> list[tuple[str, str]]:
 
 
 def owner_private_commands(settings, teams=()) -> list[tuple[str, str]]:
-    return bot_commands(settings, teams) + [(c, t("cmd_" + c)) for c in OWNER_PRIVATE]
+    return [("menu", t("cmd_menu"))] + bot_commands(settings, teams)
+
+
+def hub_view(group: str = "", teams=()):
+    """(text, keyboard) of the owner's tiles; "preview" lists what can be previewed, sub-menus end with ↩️ Menu."""
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+    def tile(label, data):
+        return InlineKeyboardButton(text=label, callback_data=data[:64])
+
+    if group == "preview":
+        rows = [[tile(t("tile_news"), "hp:news"), tile(t("tile_praise"), "hp:praise")],
+                [tile(t("tile_birthday"), "hp:birthday")]] + [[tile(f"⚽ {team.name}", f"hp:{team.command}")]
+                                                              for team in teams]
+    else:
+        group = group if group in OWNER_HUB else ""
+        rows = [[tile(t(f"tile_{name}"), f"hg:{name}" if name in OWNER_HUB or name == "preview" else f"h:{name}")
+                 for name in row] for row in OWNER_HUB[group]]
+    if group:
+        rows.append([tile(t("tile_menu"), "h")])
+    return t(f"hub_{group}_title" if group else "hub_title"), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def owner_group_commands(settings, teams=()) -> list[tuple[str, str]]:

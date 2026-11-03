@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.0 (unreleased)
+
+- **🧩 The owner's menu of tiles.** In your private chat with the bot, `/menu` shows your commands as tiles - 📊 Status, 🔎 Check, 🎭 Mood, 🧠 Memory, 📈 Stats, 👥 People, 🏷 Nicknames, 📬 Deliveries, 👀 Preview ▸ (news, praise, birthday, every team) and 🛠 Bot ▸ (update, roll back, commands). A tile runs exactly the typed command and its answer comes below the menu; ↩️ Menu goes back from a sub-menu. Under **/** your private chat now has `/menu` plus the family's short list instead of 14 owner commands; everything still works when typed and `/help` lists it.
+- **Only you, only in private.** Anyone else who taps a tile - or you in the family group, where the status would show IDs - gets a pop-up instead. The family group's menu doesn't change.
+- The bot now asks Telegram for button taps too (`callback_query`); a test checks that every kind of update the bot handles is requested.
+
 ## 1.6.2 (2026-11)
 
 - **Security updates of the libraries.** certifi 2026.10.23 (critical: it no longer trusts root certificates whose intermediate CA keys were compromised), aiohttp 3.14.5, filelock 4.2.7 and multidict 6.9.1 (several high and medium advisories), plus python-dotenv 1.2.4 and tzdata 2026.6. `/update` installs them by itself (it runs `pip install` when `requirements.txt` changes); ready-made wheels exist for the Raspberry Pi (aarch64 and armv7), nothing is compiled. No change in the bot's behaviour.

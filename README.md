@@ -51,6 +51,8 @@ Whiskers: Three games, three wins. I only knock the pieces over. Respect 😻
 1. Create a bot with **@BotFather** in Telegram (or in the [Discord Developer Portal](docs/en/discord.md)) and get an AI key: [Claude](https://platform.claude.com/settings/keys) or [OpenAI](https://platform.openai.com/api-keys).
 2. **Code → Download ZIP**, unpack it, and double-click **`run.bat`** on Windows or run `sh run.sh` on macOS/Linux. The setup wizard asks everything.
 3. Claim the bot with the one-time code from the console, add it to your family group and send `/setup_chat` there (Discord: `/setup_channel`).
+
+   In your private chat with the bot, **`/menu`** shows your owner commands as tiles (📊 Status, 🔎 Check, 🎭 Mood, 🧠 Memory, 📈 Stats, 👥 People, 🏷 Nicknames, 📬 Deliveries, 👀 Preview ▸, 🛠 Bot ▸) instead of a long list under **/**. The family group keeps its short list; typed commands still work.
 4. Tell it about your family: **[Your family's data](docs/en/your-data.md)**.
 
 Step by step: **[Getting started](docs/en/getting-started.md)** · **[Discord](docs/en/discord.md)**.

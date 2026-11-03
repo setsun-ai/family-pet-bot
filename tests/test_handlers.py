@@ -233,7 +233,8 @@ class MenuTests(unittest.IsolatedAsyncioTestCase):
         menus = self.menus()
         self.assertIn("riverside", menus["default"])
         self.assertNotIn("status", menus["default"])  # the family doesn't see admin commands
-        self.assertTrue({"status", "check", "preview", "deliveries"} <= set(menus["BotCommandScopeChat"]))
+        self.assertEqual(menus["BotCommandScopeChat"][0], "menu")  # the owner's commands are tiles behind /menu
+        self.assertFalse({"status", "check", "preview", "deliveries"} & set(menus["BotCommandScopeChat"]))
         self.assertTrue({"who", "name", "unname", "setup_chat"} <= set(menus["BotCommandScopeChatMember"]))
         for lang in ("en", "ru"):
             set_language(lang)
@@ -246,3 +247,78 @@ class MenuTests(unittest.IsolatedAsyncioTestCase):
     async def test_setup_chat_refreshes_the_menus(self):
         await handle(self.h.message("/setup_chat", chat=-2000), self.h.app)
         self.assertIn("BotCommandScopeChatMember", self.menus())
+
+
+class TileMenuTests(unittest.IsolatedAsyncioTestCase):
+    """The owner's /menu of tiles in the private chat (the family group keeps the short "/" list)."""
+
+    async def asyncSetUp(self):
+        self.h = await Harness().open()
+        self.dispatcher = Dispatcher()
+        self.dispatcher.include_router(make_router(self.h.app))
+        self.updates = 0
+
+    async def asyncTearDown(self):
+        await self.h.close()
+
+    def requests(self, kind):
+        return [r for r in self.h.session.requests if type(r).__name__ == kind]
+
+    @staticmethod
+    def tiles(request):
+        return [b.callback_data for row in request.reply_markup.inline_keyboard for b in row]
+
+    async def press(self, data, uid=OWNER, chat=OWNER):
+        from aiogram.types import CallbackQuery, User
+        self.updates += 1
+        menu = Message(message_id=500, date=datetime.now(UTC), text="menu",
+                       chat=Chat(id=chat, type="private" if chat > 0 else "supergroup"), from_user=ME)
+        query = CallbackQuery(id=str(self.updates), from_user=User(id=uid, is_bot=False, first_name="U"),
+                              chat_instance="c", data=data, message=menu)
+        await self.dispatcher.feed_update(self.h.bot, Update(update_id=self.updates, callback_query=query))
+
+    async def test_owner_steers_by_tiles(self):
+        await handle(self.h.message("/menu"), self.h.app)
+        menu = self.h.session.sent[-1]
+        self.assertEqual(self.tiles(menu), ["h:status", "h:check", "h:mood", "h:memory", "h:stats", "h:users",
+                                            "h:names", "h:deliveries", "hg:preview", "hg:bot"])
+        for row in menu.reply_markup.inline_keyboard:  # fits a phone: 42 characters a row, emoji count as two
+            for b in row:
+                width = sum(0 if ch in "️‍" else 2 if ord(ch) >= 0x2300 else 1 for ch in b.text)
+                self.assertLessEqual(width, 42 // len(row) - 2, b.text)
+
+        sent = len(self.h.session.sent)
+        await self.press("h:status")  # like typing /status: the answer comes below the menu
+        self.assertEqual(len(self.h.session.sent), sent + 1)
+        self.assertIn(f"Owner: {OWNER}", self.h.last_text())
+
+        await self.press("hg:bot")
+        self.assertEqual(self.tiles(self.requests("EditMessageText")[-1]), ["h:update", "h:rollback", "h:help", "h"])
+        await self.press("hg:preview")
+        self.assertEqual(self.tiles(self.requests("EditMessageText")[-1]),
+                         ["hp:news", "hp:praise", "hp:birthday", "hp:riverside", "h"])
+        await self.press("h")
+        self.assertEqual(self.tiles(self.requests("EditMessageText")[-1])[0], "h:status")
+        await self.press("h:help")
+        self.assertIn("/news", self.h.last_text())
+
+    async def test_menu_is_only_for_the_owner_in_private(self):
+        await self.h.db.allow_user(200, True)
+        await handle(self.h.message("/menu", uid=200, chat=200), self.h.app)
+        self.assertIn("only for the owner", self.h.last_text())
+        await handle(self.h.message("/menu", chat=FAMILY, mid=2), self.h.app)
+        self.assertIn("only for the owner", self.h.last_text())
+        sent = len(self.h.session.sent)
+        await self.press("h:status", uid=200, chat=200)  # an old or forged tile
+        answer = self.requests("AnswerCallbackQuery")[-1]
+        self.assertTrue(answer.show_alert and "only for the owner" in answer.text)
+        self.assertEqual(len(self.h.session.sent), sent)
+        await self.press("h:status", chat=FAMILY)  # even the owner: never in the family group (status has IDs)
+        answer = self.requests("AnswerCallbackQuery")[-1]
+        self.assertTrue(answer.show_alert and "only for the owner" in answer.text)
+        self.assertEqual(len(self.h.session.sent), sent)
+
+    async def test_every_handled_update_is_requested_from_telegram(self):
+        from petbot.app import ALLOWED_UPDATES
+        self.assertLessEqual(set(self.dispatcher.resolve_used_update_types()), set(ALLOWED_UPDATES))
+        self.assertIn("callback_query", ALLOWED_UPDATES)

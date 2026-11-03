@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from aiogram import Bot, Router
 from aiogram.enums import ChatType
 from aiogram.exceptions import TelegramAPIError
-from aiogram.types import Message, MessageReactionUpdated, ReactionTypeEmoji, User
+from aiogram.types import CallbackQuery, Message, MessageReactionUpdated, ReactionTypeEmoji, User
 
 from . import __version__, updater
 from .ai import AIService
@@ -30,7 +30,7 @@ from .delivery import DeliveryService
 from .family import FamilyService
 from .housekeeping import Housekeeping
 from .i18n import t
-from .menus import publish_menus
+from .menus import hub_view, publish_menus
 from .mood import MoodService
 from .news import NewsService
 from .notice import Noticer
@@ -180,6 +180,14 @@ async def handle(message: Message, app: App, *, edited: bool = False) -> None:
     if not allowed:
         if is_private and command in {"start", "help", "privacy"} and app.limiter.allow("public:global", 60):
             await reply(message, t("private_bot"), app)
+        return
+
+    if command == "menu":  # the owner's tiles, private chat only
+        if owner and is_private:
+            text, keyboard = hub_view(teams=app.sports.teams)
+            await message.answer(text, reply_markup=keyboard)
+        else:
+            await reply(message, t("owner_private_only"), app)
         return
 
     # --- nicknames (owner, as a reply in the family group) ---
@@ -446,6 +454,39 @@ async def owner_command(message: Message, app: App, command: str, args: str, own
         await reply(message, t("retry_done") if ok else t("retry_missing"), app)
 
 
+async def hub_callback(query: CallbackQuery, app: App) -> None:
+    """
+    A tile of the owner's /menu: a group opens in place of the menu, anything else runs exactly like the typed
+    command (its answer comes below the menu). Only the owner, only in the private chat - others get a pop-up.
+    """
+    data, menu = query.data or "", query.message
+    if not (data == "h" or data.startswith(("h:", "hg:", "hp:"))):
+        await query.answer()
+        return
+    private = menu is not None and menu.chat.type == ChatType.PRIVATE
+    if not private or not await app.access.is_owner(query.from_user.id):
+        await query.answer(t("owner_private_only"), show_alert=True)
+        return
+    if not isinstance(menu, Message):  # older than 48 h: Telegram no longer lets us edit or reply to it
+        await query.answer(t("menu_expired"), show_alert=True)
+        return
+    await query.answer()
+    kind, _, name = data.partition(":")
+    if data == "h" or kind == "hg":
+        text, keyboard = hub_view(name, app.sports.teams)
+        await app.bot.edit_message_text(text, chat_id=menu.chat.id, message_id=menu.message_id, reply_markup=keyboard)
+        return
+    as_owner = menu.model_copy(update={"from_user": query.from_user}).as_(app.bot)  # as if the owner typed it
+    if kind == "hp":
+        await preview_command(as_owner, app, name)
+    elif name == "help":
+        await reply(as_owner, help_text(app), app, transient=False)
+    elif name in NICKNAME_COMMANDS:
+        await nickname_command(as_owner, app, name, "", True, True)
+    elif name in OWNER_PRIVATE_COMMANDS:
+        await owner_command(as_owner, app, name, "", True, True)
+
+
 async def preview_command(message: Message, app: App, args: str) -> None:
     """/preview: see a post before the family does (details: core.preview_text)."""
     await typing(message)
@@ -519,6 +560,15 @@ def make_router(app: App) -> Router:
     @router.edited_message()
     async def dispatch_edit(message: Message):
         await guarded(message, edited=True)
+
+    @router.callback_query()
+    async def dispatch_tile(query: CallbackQuery):
+        try:
+            await hub_callback(query, app)
+        except TelegramAPIError as error:
+            log.warning("Telegram rejected a tile response (%s)", type(error).__name__)
+        except Exception as error:
+            log.error("Tile failed (%s); secrets are not logged", type(error).__name__)
 
     async def guarded(message: Message, *, edited: bool):
         task = asyncio.current_task()

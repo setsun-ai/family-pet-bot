@@ -28,6 +28,9 @@ class RedactingFormatter(logging.Formatter):
         return re.sub(r"\bsk-[A-Za-z0-9_-]{10,}", "[API_KEY]", result)
 
 
+# Every update type the router handles (a missing one never reaches the bot - tiles did nothing before).
+ALLOWED_UPDATES = ["message", "edited_message", "message_reaction", "callback_query"]
+
 def setup_logging(settings: Settings, log_file: str | None = None) -> None:
     formatter = RedactingFormatter((settings.bot_token, settings.api_key, settings.sports_api_key
                                     if settings.sports_api_key != "3" else ""))
@@ -123,7 +126,7 @@ async def run(settings: Settings, check: bool = False) -> int:
             scheduler.start()
             logging.info(t("console_started", username=me.username, tz=settings.timezone))
             try:
-                await dispatcher.start_polling(bot, allowed_updates=["message", "edited_message", "message_reaction"], tasks_concurrency_limit=32,
+                await dispatcher.start_polling(bot, allowed_updates=ALLOWED_UPDATES, tasks_concurrency_limit=32,
                                                close_bot_session=False)
             finally:
                 await scheduler.stop()
