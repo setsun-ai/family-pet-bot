@@ -54,6 +54,14 @@ WORRY_WORDS = frozenset("""
 UA_WORRY = re.compile(r"(?<!\w)(?:обстріл\w*|тривог[аиуоіою]*|укритт\w*|вибух\w*|прил[іе]т\w*|прильот\w*|"
                       r"шахед\w*|ракет(?:а|и|у|ою|і|ам|ами|ах|н[аеиіоу]\w*)?|атак(?:а|и|у|ою|ам|ами|ах|ував\w*|ують|ує)?|"
                       r"бомбардуван\w*|сирен[аиуоюі]*)(?!\w)", re.I)
+# A tragedy - people killed, a shooting, a terror attack, a death - in the languages the family forwards news in.
+# The pet stays silent then: no emoji, sad or otherwise, under people's deaths.
+GRAVE = re.compile(
+    r"(?<!\w)(?:стрельб\w*|расстрел\w*|теракт\w*|убит[аыоюй]?\w*|убийств\w*|погиб\w*|гибел\w*|жертв(?:а|ы|ой|ами|ах)?|"
+    r"трагеди\w*|смерт\w*|умер(?:ла|ли|ло)?|умерш\w*|скончал\w*|похорон\w*|"
+    r"стрілянин\w*|розстріл\w*|загибл\w*|загину\w*|загибел\w*|вбит\w*|вбивств\w*|трагеді\w*|помер(?:ла|ли|ло)?|"
+    r"strzelanin\w*|zabit[aiy]?\w*|zabójstw\w*|zginęł\w*|zginął|ofiar\w*|zamach\w*|tragedi\w*|śmier[cć]\w*|zmarł\w*|"
+    r"shooting|shot dead|killed|massacre|terror attack|passed away|funeral)(?!\w)", re.I)
 RELIEF_WORDS = frozenset("отбой відбій".split())  # "отбой тревоги" is the end of the alarm, not a new one
 NEGATIONS = frozenset({"не", "ни"})  # "нет, я сдала!" is not a negated achievement
 HAPPY_EMOJI = set("🎉🥳🏆💪🔥🤩🙌✨")
@@ -72,7 +80,7 @@ EN_NEGATED = re.compile(r"\b(?:didn'?t|did not|couldn'?t|could not|not)\s+(?:pas
 
 @dataclass(frozen=True)
 class Feeling:
-    kind: str  # "achievement" | "sad" | "worry"
+    kind: str  # "achievement" | "sad" | "worry" | "grave"
     target: str | None  # the family name it's about, or None (= the author)
     strength: int  # 1 = a hint, 3+ = obvious ("ура, сдала!!! 🎉")
 
@@ -125,6 +133,8 @@ class Reader:
         lemmas_all = {lemma.replace("ё", "е") for word in words for lemma, _, _ in _forms(word)} | set(words)
         if lemmas_all & RELIEF_WORDS:
             return None
+        if GRAVE.search(text):
+            return Feeling("grave", self._target(words, author), 1)
         worry = sum(1 for word in words if {lemma.replace("ё", "е") for lemma, _, _ in _forms(word)} & WORRY_WORDS
                     or (_morph() is None and _stem_hit(word, WORRY_WORDS)))
         if worry or UA_WORRY.search(text) or re.search(r"\b(?:air[- ]raid|drones?|shelling|missiles?|sirens?)\b",

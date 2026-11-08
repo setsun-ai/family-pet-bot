@@ -166,6 +166,13 @@ class LinkReactions(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.h.session.sent)
         self.assertIn(FAMILY, self.h.scheduler.hushed)
 
+    async def test_a_tragedy_behind_a_link_silences_the_pet(self):
+        self.pages["https://example.org/krakow"] = "Strzelanina na Rynku w Krakowie. Nie żyje pięć osób"
+        await handle(self.h.message("https://example.org/krakow", uid=ANNA, chat=FAMILY, mid=84), self.h.app)
+        await handle(self.h.message("Кошмар", uid=ANNA, chat=FAMILY, mid=85), self.h.app)
+        self.assertEqual(self.reactions(), [])
+        self.assertIn(FAMILY, self.h.scheduler.hushed)
+
     async def test_off(self):
         self.h.app.noticer.peek = None
         self.pages["https://example.org/cafe"] = "Ночной обстрел, все в укрытии"

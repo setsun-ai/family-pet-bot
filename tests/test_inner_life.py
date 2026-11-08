@@ -188,6 +188,39 @@ class NoticingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.reactions(), ["😢"])  # a quiet tear: not sobbing, not praying hands
         self.assertFalse(self.h.session.sent)
 
+    async def test_a_tragedy_gets_no_emoji_and_neither_does_what_follows(self):  # Kraków, 7 November
+        clock = [1000.0]
+        self.h.app.noticer = Noticer(Reader(("Anna", "Mom")), None, delay=(0, 0), rng=random.Random(1),
+                                     clock=lambda: clock[0])
+        await handle(self.h.message("❗ 5 загиблих: стрілянина сталася в центрі Кракова", chat=FAMILY, mid=30),
+                     self.h.app)
+        self.assertIn(FAMILY, self.h.scheduler.hushed)  # no small talk of its own
+        await handle(self.h.message("Кошмар", chat=FAMILY, mid=31), self.h.app)
+        self.assertEqual(self.reactions(), [])  # no 🤗 under people's deaths
+        clock[0] += 61 * 60
+        await handle(self.h.message("Кошмар", chat=FAMILY, mid=32), self.h.app)  # an hour later: ordinary sadness
+        self.assertEqual(len(self.reactions()), 1)
+
+    async def test_tragedies_in_every_language_the_family_forwards(self):
+        for mid, text in enumerate(["В центре стрельба, погибли люди", "Strzelanina w Krakowie, są ofiary",
+                                    "Shooting downtown, five people killed", "Теракт в метро"], start=40):
+            await handle(self.h.message(text, chat=FAMILY, mid=mid), self.h.app)
+        self.assertEqual(self.reactions(), [])
+
+    async def test_a_tragedy_right_after_the_pets_question_is_not_taken_for_an_answer(self):
+        await self.h.delivery.send(FAMILY, "Смотрим? 🐈", [("sports-kickoff", "k1")])
+        await handle(self.h.message("Strzelanina w centrum, są ofiary", chat=FAMILY, mid=50), self.h.app)
+        await handle(self.h.message("да", chat=FAMILY, mid=51), self.h.app)
+        self.assertEqual(self.reactions(), [])  # no 👍 as if someone said "yes, watching"
+
+    async def test_words_that_only_look_like_a_tragedy_are_ordinary(self):
+        from petbot.sentiment import Reader as R
+        reader = R(("Anna", "Mom"))
+        for text in ("умеренный дождь", "пожертвовала на приют", "бессмертный полк", "deadline is tomorrow",
+                     "Mom is sick"):
+            feeling = reader.read(text)
+            self.assertFalse(feeling and feeling.kind == "grave", text)
+
     async def test_private_chats_and_addressed_messages_are_not_noticed(self):
         await handle(self.h.message("I passed the exam!", chat=OWNER, mid=23), self.h.app)
         self.h.ai.chat.assert_called_once()  # a normal conversation
@@ -505,6 +538,13 @@ class ChimeInTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([m.text for m in self.h.session.sent], ["Мяу, я тоже хочу смеяться"])
         await self.chat([(OWNER, "hahaha"), (555, "lol"), (OWNER, "haha"), (555, "hahaha"), (OWNER, "😂"), (555, "lol")])
         self.assertEqual(len(self.h.session.sent), 1)  # at most once in 3 hours
+
+    async def test_no_chiming_in_for_an_hour_after_a_tragedy(self):
+        await self.chat([(555, "Strzelanina w centrum, są ofiary")])
+        await self.chat([(OWNER, "hahaha"), (555, "lol"), (OWNER, "did you see that"), (555, "hahahaha"),
+                         (OWNER, "I can't 😂"), (555, "ok ok")])
+        self.h.ai.post.assert_not_called()
+        self.assertFalse(self.h.session.sent)
 
     async def test_quiet_or_one_person_or_no_vibe_means_no_chime(self):
         await self.chat([(OWNER, "hahaha")] * 7)  # one person laughing alone

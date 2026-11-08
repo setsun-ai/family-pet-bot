@@ -3,6 +3,7 @@
 ## 1.7.1 (2026-11)
 
 - **Fix: no more sulking when the family did answer "watching?".** After a match the pet decides whether anyone reacted to its kick-off call; if not, it sends an ironic line like "Ну и ладно. 0:1, если кому интересно". It missed three real answers: "Ага" 41 minutes after the call (only 15 minutes counted), a 🙏 reaction under the call (reactions didn't count) and "первый тайм" (the word wasn't known). Now an answer-like word ("ага", "да", "нет", match words) counts for the whole match, up to 3 hours; any reaction under the call counts; and тайм, период, половина, игра, гра, half, game are match words. Unrelated chatter ("кто купил хлеб") still doesn't count, as before.
+- **Fix: silence after a tragedy, not a hug.** A forwarded post in Ukrainian about a shooting with five dead went unrecognised, and the "Кошмар" under it got a random sad reaction - 🤗. The pet now recognises news of people killed, shootings, terror attacks and deaths (Russian, Ukrainian, Polish, English, also behind a shared link) and then reacts to nothing in the chat for an hour: no emoji, no answer emoji, no chiming in, no small talk of its own. Ordinary sadness ("Mom is sick") still gets 😢 or 🤗. Note: a death in the family is also met with silence now, not 💔.
 
 ## 1.7.0 (2026-11)
 
