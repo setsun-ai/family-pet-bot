@@ -39,7 +39,7 @@ from collections import deque
 from dataclasses import replace
 from datetime import datetime, timedelta
 
-from .common import ServiceError
+from .common import MATCH_TALK, ServiceError
 from .lines import Lines
 from .linkpeek import first_link
 from .phrases import cheer
@@ -62,6 +62,8 @@ GLANCE_PER_DAY = 20  # AI calls a day for glances
 CHIME_GAP = 3600  # seconds between lines the pet says on its own after a glance
 ANSWER_WINDOW = 5 * 60  # seconds after the pet's message when the next words are probably meant for it
 QUESTION_WINDOW = 15 * 60  # ...after a question ("смотрим?")
+MATCH_WINDOW = 3 * 60 * 60  # "watching?" about a match: answered whenever someone looks at the phone, in words that
+#                              sound like an answer ("Ага" 41 minutes later is one; "кто купил хлеб" isn't)
 ANSWER_MESSAGES = 2  # only the first messages after the pet's one
 PEEKS_PER_HOUR = 30  # pages opened for LINK_PREVIEW
 ANNOYED = re.compile(r"(?<!\w)(?:не\s+беси\w*|бесишь|бесит|отстань|отвали|отвянь|хватит|замолчи|заткнись|надоел\w*|"
@@ -111,7 +113,7 @@ class Noticer:
         """
         if chat_id != await app.db.family():
             return None
-        answer = self._answer_to_pet(app, chat_id, user_id, replying_to_someone)
+        answer = self._answer_to_pet(app, chat_id, user_id, replying_to_someone, text)
         author = await app.db.family_name(user_id)
         mood = await app.mood.current() if app.mood else None
         feeling = self.reader.read(text, author) if self.reader and text else None
@@ -138,7 +140,7 @@ class Noticer:
 
     # --- answers to the pet without a reply or its name ---
 
-    def _answer_to_pet(self, app, chat_id: int, user_id: int, replying_to_someone: bool):
+    def _answer_to_pet(self, app, chat_id: int, user_id: int, replying_to_someone: bool, text: str = ""):
         """The pet's message this one probably answers (delivery.PetMessage), or None. Once per pet message."""
         last = getattr(app.delivery, "last_sent", {}).get(chat_id)
         if last is None:
@@ -148,6 +150,8 @@ class Noticer:
             count, answered = 0, False
         count += 1
         window = QUESTION_WINDOW if last.question else ANSWER_WINDOW
+        if last.kind == "sports-kickoff" and (AGREE.search(text) or DECLINE.search(text) or MATCH_TALK.search(text)):
+            window = MATCH_WINDOW
         if answered or replying_to_someone or count > ANSWER_MESSAGES or time.monotonic() - last.at > window or \
                 last.to_user not in (None, user_id):  # the pet was talking to someone else
             self.after_pet[chat_id] = (last.message_id, count, answered)

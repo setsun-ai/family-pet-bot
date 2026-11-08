@@ -225,12 +225,12 @@ class Database:
                 await db.execute("DELETE FROM feedback WHERE chat_id=? AND message_id=? AND user_id=? AND emoji=?",
                                  (chat_id, message_id, user_id, emoji))
 
-    async def replies_since(self, chat_id: int, kind: str, since: datetime) -> int:
-        """Replies ("↩") to the pet's messages of this kind sent after `since`."""
+    async def responses_since(self, chat_id: int, kind: str, since: datetime) -> int:
+        """Replies ("↩") and reactions to the pet's messages of this kind sent after `since`."""
         async with self.transaction() as db:
             async with db.execute(
                 "SELECT COUNT(*) FROM feedback f JOIN sent_messages s ON f.chat_id=s.chat_id AND f.message_id=s.message_id "
-                "WHERE s.chat_id=? AND s.kind=? AND s.created_at>=? AND f.emoji='↩'",
+                "WHERE s.chat_id=? AND s.kind=? AND s.created_at>=?",
                 (chat_id, kind, since.astimezone(UTC).isoformat())) as cur:
                 return (await cur.fetchone())[0]
 

@@ -16,7 +16,7 @@ import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
-from .common import ServiceError
+from .common import MATCH_TALK, ServiceError
 from .config import Settings
 from .db import Database
 from .delivery import DeliveryService
@@ -27,9 +27,6 @@ from .news import NewsService
 from .sports import Match, SportsService, Team
 
 log = logging.getLogger(__name__)
-# Talk about the match in the family chat: someone answered the pet's "watching?" without replying to it.
-MATCH_TALK = re.compile(r"смотр|гляну|дивим|дивлюс|включ|матч|гол\b|голы|счёт|счет|забил|судь|футбол|"
-                        r"watch|match|goal|score", re.I)
 POST_KINDS = ("news", "sports-preview", "sports-kickoff", "sports-result", "praise", "birthday", "spontaneous", "chime")
 
 
@@ -268,8 +265,8 @@ class Scheduler:
             await self.delivery.send(chat, text, [("sports-result", key)], sound="none")
 
     async def _watched(self, chat: int, called: datetime) -> bool:
-        """Did anyone react to the kick-off call: a reply to it, a word to the pet, or talk about the match?"""
-        if await self.db.replies_since(chat, "sports-kickoff", called - timedelta(minutes=1)):
+        """Did anyone react to the kick-off call: a reply or an emoji under it, a word to the pet, or match talk?"""
+        if await self.db.responses_since(chat, "sports-kickoff", called - timedelta(minutes=1)):
             return True
         spoke = await self.db.last_delivery_at(chat, ("dialog",))
         talk = self.match_talk.get(chat)

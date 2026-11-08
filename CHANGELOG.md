@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.1 (2026-11)
+
+- **Fix: no more sulking when the family did answer "watching?".** After a match the pet decides whether anyone reacted to its kick-off call; if not, it sends an ironic line like "Ну и ладно. 0:1, если кому интересно". It missed three real answers: "Ага" 41 minutes after the call (only 15 minutes counted), a 🙏 reaction under the call (reactions didn't count) and "первый тайм" (the word wasn't known). Now an answer-like word ("ага", "да", "нет", match words) counts for the whole match, up to 3 hours; any reaction under the call counts; and тайм, период, половина, игра, гра, half, game are match words. Unrelated chatter ("кто купил хлеб") still doesn't count, as before.
+
 ## 1.7.0 (2026-11)
 
 - **🧩 The owner's menu of tiles.** In your private chat with the bot, `/menu` shows your commands as tiles - 📊 Status, 🔎 Check, 🎭 Mood, 🧠 Memory, 📈 Stats, 👥 People, 🏷 Nicknames, 📬 Deliveries, 👀 Preview ▸ (news, praise, birthday, every team) and 🛠 Bot ▸ (update, roll back, commands). A tile runs exactly the typed command and its answer comes below the menu; ↩️ Menu goes back from a sub-menu. Under **/** your private chat now has `/menu` plus the family's short list instead of 14 owner commands; everything still works when typed and `/help` lists it.

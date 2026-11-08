@@ -416,6 +416,66 @@ class CasualMatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.h.session.sent), 1)
 
 
+    # --- the family chat of 6 November: three answers, and still "Ну и ладно" ---
+
+    def as_on_the_pi(self):
+        self.h.app.noticer = Noticer(None, None, delay=(0, 0))  # the Pi has reactions on, so answers are noticed
+
+    def minutes_later(self, minutes):
+        last = self.h.delivery.last_sent[FAMILY]
+        self.h.delivery.last_sent[FAMILY] = replace(last, at=last.at - minutes * 60)
+
+    def ironic_if_ignored(self):
+        self.h.scheduler.rng = random.Random(1)
+        self.h.scheduler.rng.random = lambda: 0.1  # if it decides "ignored", the sulky line is sent
+
+    async def test_yes_41_minutes_after_the_call_still_counts(self):
+        self.as_on_the_pi()
+        await self.kickoff()
+        self.minutes_later(41)
+        await handle(self.h.message("Ага", chat=FAMILY, mid=80), self.h.app)
+        self.ironic_if_ignored()
+        await self.final_whistle()
+        self.assertEqual(self.h.ai.post.call_args.args[0], "match_result_casual")
+
+    async def test_unrelated_words_long_after_the_call_are_still_no_answer(self):
+        self.as_on_the_pi()
+        await self.kickoff()
+        self.minutes_later(41)
+        await handle(self.h.message("кто купил хлеб", chat=FAMILY, mid=81), self.h.app)
+        self.ironic_if_ignored()
+        await self.final_whistle("Ага. 3:1, если кому интересно")
+        self.assertEqual(self.h.ai.post.call_args.args[0], "match_result_ignored")
+
+    async def test_a_reaction_under_the_call_counts(self):
+        await self.kickoff()
+        kickoff_id = 1001  # RecordingSession numbers messages from 1001
+        await reaction_update(MessageReactionUpdated(
+            chat=Chat(id=FAMILY, type="supergroup"), message_id=kickoff_id, user=User(id=OWNER, is_bot=False, first_name="A"),
+            date=datetime.now(UTC), old_reaction=[], new_reaction=[ReactionTypeEmoji(emoji="🙏")]), self.h.app)
+        self.ironic_if_ignored()
+        await self.final_whistle()
+        self.assertEqual(self.h.ai.post.call_args.args[0], "match_result_casual")
+
+    async def test_talk_of_the_first_half_counts(self):
+        await self.kickoff()
+        await handle(self.h.message("Я первый тайм на работе был, вижу, что ничего не пропустил", chat=FAMILY, mid=82),
+                     self.h.app)
+        self.ironic_if_ignored()
+        await self.final_whistle()
+        self.assertEqual(self.h.ai.post.call_args.args[0], "match_result_casual")
+
+
+    async def test_a_yes_the_next_day_is_not_an_answer_to_yesterdays_call(self):
+        self.as_on_the_pi()
+        await self.kickoff()
+        self.minutes_later(4 * 60)
+        before = len([r for r in self.h.session.requests if isinstance(r, SetMessageReaction)])
+        await handle(self.h.message("да", chat=FAMILY, mid=83), self.h.app)
+        after = len([r for r in self.h.session.requests if isinstance(r, SetMessageReaction)])
+        self.assertEqual(after, before)  # no 👍 under it as if it answered the pet
+
+
 # --- chiming into a lively conversation -------------------------------------------------------------
 
 class ChimeInTests(unittest.IsolatedAsyncioTestCase):

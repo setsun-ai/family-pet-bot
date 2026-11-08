@@ -170,3 +170,9 @@ async def fetch_bytes(client: httpx.AsyncClient, url: str, max_bytes: int = 2_00
                 continue
             raise ServiceError("source_unavailable") from None
     raise ServiceError("source_unavailable")
+
+
+# Talk about the match in the family chat: someone answered the pet's "watching?" without replying to it.
+MATCH_TALK = re.compile(r"смотр|гляну|дивим|дивлюс|включ|матч|гол\b|голы|счёт|счет|забил|судь|футбол|"
+                        r"тайм|период|половин|игра\b|играют|грають|гра\b|"
+                        r"watch|match|goal|score|half|game", re.I)
